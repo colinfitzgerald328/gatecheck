@@ -1,0 +1,18 @@
+{
+  "branch": "leak/dyn-threshold",
+  "base": "main",
+  "test": "node --test 'api/test/**/*.test.ts'",
+  "leaks": [
+    {
+      "file": "api/src/pricing.ts",
+      "line": 13,
+      "category": "ungated-modification"
+    },
+    {
+      "file": "api/test/pricing.test.ts",
+      "line": 1,
+      "category": "test-regression",
+      "name": "ships free at the threshold"
+    }
+  ]
+}

@@ -17,7 +17,7 @@ new flags: expressCheckout
     + return cart.items.reduce((sum, item) => sum + item.price * item.qty, 0) + cart.tax;
 ```
 
-## Status: M3
+## Status: M5
 
 - TypeScript/TSX and Python via tree-sitter (WASM). Python covers `if`/`elif`/`else`,
   `and`/`or`/`not`, conditional expressions, relative and absolute imports, FastAPI/Flask
@@ -33,6 +33,8 @@ new flags: expressCheckout
   [fixture-shop](https://github.com/colinfitzgerald328/fixture-shop)
 - GitHub Action: PR comment, line annotations, failing check
 - Claude Code plugin: hooks after each edit and before Claude finishes, a skill, `/gatecheck`
+- Dynamic layer: `--test` runs your tests on the base and on the branch with the new flags off
+  and reports tests that pass on the base but fail on the branch
 
 Requires Node 23.6+ (runs TypeScript directly, no build step).
 
@@ -43,6 +45,32 @@ npx gatecheck check --base main                 # working tree vs main
 npx gatecheck check --base main --head my-branch
 npx gatecheck bench bench/expected/fixture-shop --repo ../fixture-shop
 ```
+
+## Running your tests (`--test`)
+
+Static projection can't judge everything: a changed JSON file, a SQL query, a config value.
+With `--test`, gatecheck also checks out the base in a temporary git worktree, runs your test
+command there and on the branch, and compares the results test by test.
+
+```
+npx gatecheck check --base main --test "node --test 'test/**/*.test.ts'"
+```
+
+- **`test-regression`** (error): passes on the base, fails on the branch. It has to fail again
+  on a second run, so flaky tests don't count.
+- **`test-removed`** (warn): runs on the base, missing on the branch.
+- `node --test`, vitest and pytest get JUnit flags added. For anything else, put `{junit}`
+  where the report path goes: `--test "npm test -- --reporter=junit --outputFile={junit}"`.
+- Both runs get the new flags in `GATECHECK_FLAGS_OFF` (`expressCheckout,express-checkout`).
+  Usually you need nothing: the flag doesn't exist on the base, and most flag mocks return the
+  fallback for unknown keys. If your mocks turn every flag on, have them read this variable.
+- The base worktree shares the checkout's `node_modules`. Install dependencies first.
+- Test files (`*.test.*`, `*.spec.*`, `__tests__/`, `test/`, `tests/`, `test_*.py`, `*_test.py`,
+  `conftest.py`) are left out of the static check: test code doesn't run in production, and a
+  new feature's new tests aren't leaks.
+
+Set it once in the config with `"test": { "command": "..." }`, or pass `test-command` to the
+GitHub Action.
 
 ## Claude Code plugin
 
@@ -95,6 +123,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - uses: colinfitzgerald328/gatecheck@main
+        with:
+          test-command: npm test -- --reporter=junit --outputFile={junit}   # optional
 ```
 
 The action posts one comment per PR and updates it on each push, annotates each leak on
@@ -113,6 +143,8 @@ by default; every other leak is an error. Change any of them in `gatecheck.confi
 | `optional-param` | New trailing parameter with `?` or a default | allow |
 | `new-endpoint` | `app.get('/path', …)` or `@router.get("/path")` on a path `main` doesn't serve, plus helpers only it uses | allow |
 | `outside-projection` | A changed file gatecheck can't parse: migrations, `package.json`, config | warn |
+| `test-regression` | With `--test`: a test that passes on the base fails on the branch | error |
+| `test-removed` | With `--test`: a test that runs on the base is missing on the branch | warn |
 | `ungated-modification` | Existing code that differs with the flag off | error |
 | `ungated-deletion` | Code on `main` that's gone with the flag off | error |
 | `reachable-addition` | New code that still runs with the flag off | error |

@@ -1,0 +1,13 @@
+{
+  "branch": "edge/dyn-deleted-test",
+  "base": "main",
+  "test": "node --test 'api/test/**/*.test.ts'",
+  "leaks": [
+    {
+      "file": "api/test/pricing.test.ts",
+      "line": 1,
+      "category": "test-removed",
+      "name": "ships free at the threshold"
+    }
+  ]
+}

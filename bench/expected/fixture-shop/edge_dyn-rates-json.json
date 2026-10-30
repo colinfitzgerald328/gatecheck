@@ -1,0 +1,18 @@
+{
+  "branch": "edge/dyn-rates-json",
+  "base": "main",
+  "test": "node --test 'api/test/**/*.test.ts'",
+  "leaks": [
+    {
+      "file": "api/src/shipping-rates.json",
+      "line": 1,
+      "category": "outside-projection"
+    },
+    {
+      "file": "api/test/pricing.test.ts",
+      "line": 1,
+      "category": "test-regression",
+      "name": "ships free at the threshold"
+    }
+  ]
+}

@@ -1,7 +1,14 @@
 import type { TopLevelItem } from './adapter.ts';
 import { firstPos, lastPos, ser, type N, type Pos } from './tree.ts';
 
-export type LeakKind = 'ungated-modification' | 'ungated-deletion' | 'reachable-addition' | 'outside-projection';
+export type LeakKind =
+  | 'ungated-modification'
+  | 'ungated-deletion'
+  | 'reachable-addition'
+  | 'outside-projection'
+  // From running the tests (dynamic.ts):
+  | 'test-regression'
+  | 'test-removed';
 
 /** Ungated changes that can't break an existing caller. Each one has its own policy setting. */
 export type AdditiveKind = 'optional-field' | 'response-field' | 'optional-param' | 'new-endpoint';
@@ -29,6 +36,8 @@ export interface Leak {
   base?: Span;
   /** Reason from a `gatecheck-allow:` comment. */
   allowed?: string;
+  /** Extra context, e.g. a failing test's message. */
+  detail?: string;
 }
 
 function span(n: N, fallback: Pos | undefined): Span {

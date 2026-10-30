@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
   checkBranch,
   checkFiles,
+  DEFAULT_POLICY,
   defaultBase,
+  runDynamic,
   readAt,
   repoRoot,
   runBench,
@@ -16,7 +18,7 @@ import {
   type Score,
 } from '@gatecheck/core';
 import { findConfig, loadConfig } from './config.ts';
-import { allowComment, describe, github, markdown, why, type Sources } from './formats.ts';
+import { allowComment, describe, github, markdown, note, why, type Sources } from './formats.ts';
 import { runHook } from './hook.ts';
 import { runInit } from './init.ts';
 
@@ -34,9 +36,12 @@ Options:
   --base <ref>      what the branch is compared to (default: config base, origin's default branch, or main)
   --head <ref>      check a ref instead of the working tree
   --flag <key>      project this flag instead of detecting new ones (repeatable)
+  --test <command>  also run the tests on the base and the branch with the new flags off
+                    (node --test, vitest and pytest get JUnit flags added; else use {junit})
   --config <path>   config file (default: nearest gatecheck.config.{ts,mjs,json})
   --format <f>      text (default), json, markdown (PR comment) or github (annotations)
   --json            same as --format json
+  --markdown-out <path>  also write the PR-comment markdown to a file (one run, two outputs)
 
 Exit codes: 0 no errors, 1 leaks at error severity, 2 usage error.
 `;
@@ -82,8 +87,9 @@ function printText(title: string, result: CheckResult, sources: Sources): void {
     for (const leak of group) {
       const src = sources.get(leak.file);
       console.log(`  ${leak.file}:${leak.head.line}  ${tint(describe(leak))}  ${dim(`in ${leak.decl}`)}`);
-      if (leak.kind === 'outside-projection') {
-        console.log(dim('    not code gatecheck can project; review it by hand'));
+      const text = note(leak);
+      if (text) {
+        console.log(dim(`    ${text}`));
         continue;
       }
       if (leak.base) for (const l of snippet(src?.base, leak.base.line, leak.base.endLine)) console.log(red(`    - ${l.trim()}`));
@@ -122,6 +128,8 @@ async function main(): Promise<number> {
       config: { type: 'string' },
       json: { type: 'boolean' },
       format: { type: 'string' },
+      test: { type: 'string' },
+      'markdown-out': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -143,9 +151,20 @@ async function main(): Promise<number> {
     const root = repoRoot(process.cwd());
     const config = await loadConfig(values.config ?? findConfig(process.cwd()));
     const base = values.base ?? config.base ?? defaultBase(root);
-    const { result, changes } = await checkBranch(root, base, values.head, { presets: config.presets, policy: config.policy, flags: values.flag });
-    const title = `${values.head ?? 'working tree'} vs ${base}, ${changes.length} changed ${changes.length === 1 ? 'file' : 'files'}`;
-    output(format, result, new Map(changes.map((c) => [c.path, c])), title);
+    const { result, changes, mergeBase } = await checkBranch(root, base, values.head, { presets: config.presets, policy: config.policy, flags: values.flag });
+    let title = `${values.head ?? 'working tree'} vs ${base}, ${changes.length} changed ${changes.length === 1 ? 'file' : 'files'}`;
+
+    const testCommand = values.test ?? config.test?.command;
+    if (testCommand) {
+      const rules = { ...DEFAULT_POLICY, ...config.policy };
+      const dynamic = runDynamic({ root, mergeBase, head: values.head, command: testCommand, newFlags: result.newFlags });
+      result.leaks.push(...dynamic.leaks.map((l): ReportedLeak => ({ ...l, severity: rules[l.kind] })));
+      title += `, ${dynamic.head.length} tests run on each side`;
+      if (dynamic.flaky.length) title += ` (${dynamic.flaky.length} flaky, ignored)`;
+    }
+    const sources = new Map(changes.map((c) => [c.path, c]));
+    output(format, result, sources, title);
+    if (values['markdown-out']) writeFileSync(values['markdown-out'], markdown(result, sources, title));
     return result.leaks.some((l) => l.severity === 'error') ? 1 : 0;
   }
 

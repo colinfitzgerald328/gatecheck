@@ -5,6 +5,8 @@ export default {
   // Built-in names, or your own: { vendor: 'acme', queries: { tsx: './acme.tsx.scm' } }.
   // Query captures are documented in packages/core/src/presets/types.ts.
   presets: ['launchdarkly'],
+  // Optional: also run the tests on the base and the branch with the new flags off.
+  // test: { command: "node --test 'test/**/*.test.ts'" },
   policy: {
     // Changes that can't break an existing caller. Allowed by default.
     'optional-field': 'allow', // new `field?: T` on an interface or object type
@@ -14,6 +16,9 @@ export default {
 
     // Changed files gatecheck can't parse: migrations, package.json, config.
     'outside-projection': 'warn',
+    // With a test command:
+    'test-regression': 'error',
+    'test-removed': 'warn',
 
     // Everything else that runs with the flag off.
     'ungated-modification': 'error',

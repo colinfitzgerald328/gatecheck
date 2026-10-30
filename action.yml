@@ -11,6 +11,13 @@ inputs:
   config:
     description: Path to a gatecheck config file. Defaults to the nearest gatecheck.config.*.
     default: ''
+  test-command:
+    description: >-
+      Also run this test command on the base and on the PR with the new flags off, and report
+      tests that pass on the base but fail on the PR. node --test, vitest and pytest get JUnit
+      flags added; otherwise put {junit} where the report path goes. Install dependencies
+      before this step.
+    default: ''
   comment:
     description: Post the report as a PR comment, updated on each push.
     default: 'true'
@@ -40,13 +47,15 @@ runs:
       env:
         BASE: ${{ inputs.base || format('origin/{0}', github.base_ref) }}
         CONFIG: ${{ inputs.config }}
+        TEST_COMMAND: ${{ inputs.test-command }}
       run: |
         args=(check --base "$BASE" --head HEAD)
         [ -n "$CONFIG" ] && args+=(--config "$CONFIG")
+        [ -n "$TEST_COMMAND" ] && args+=(--test "$TEST_COMMAND")
         gatecheck() { node "$GITHUB_ACTION_PATH/packages/cli/src/main.ts" "$@"; }
         set +e
-        gatecheck "${args[@]}" --format github
-        gatecheck "${args[@]}" --format markdown > "$RUNNER_TEMP/gatecheck.md"
+        # One run prints the annotations and writes the comment: tests can be slow.
+        gatecheck "${args[@]}" --format github --markdown-out "$RUNNER_TEMP/gatecheck.md"
         status=$?
         set -e
         cat "$RUNNER_TEMP/gatecheck.md" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,6 @@
+{
+  "branch": "pass/dyn-member-discount",
+  "base": "main",
+  "test": "node --test 'api/test/**/*.test.ts'",
+  "leaks": []
+}

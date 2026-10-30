@@ -14,6 +14,19 @@ export function allowComment(file: string): string {
   return `${/\.pyi?$/.test(file) ? '#' : '//'} gatecheck-allow: <reason>`;
 }
 
+/** What to say about a finding that has no code snippet to show. */
+export function note(leak: ReportedLeak): string | undefined {
+  switch (leak.kind) {
+    case 'outside-projection':
+      return 'gatecheck can’t project this file. Review it by hand.';
+    case 'test-regression':
+      return `Passes on the base, fails on this branch with the new flags off${leak.detail ? `: ${leak.detail}` : '.'}`;
+    case 'test-removed':
+      return 'This test runs on the base but not on this branch.';
+  }
+  return undefined;
+}
+
 export function why(newFlags: string[]): string {
   return newFlags.length ? `Runs with ${newFlags.join(', ')} off` : 'No new flag gates this';
 }
@@ -31,10 +44,7 @@ export function github(result: CheckResult): string {
     .filter((l) => l.severity !== 'allow')
     .map((l) => {
       const level = l.severity === 'error' ? 'error' : 'warning';
-      const message =
-        l.kind === 'outside-projection'
-          ? 'gatecheck can’t project this file. Review it by hand.'
-          : `${why(result.newFlags)}. Move it behind a flag, or add ${allowComment(l.file)}`;
+      const message = note(l) ?? `${why(result.newFlags)}. Move it behind a flag, or add ${allowComment(l.file)}`;
       return `::${level} file=${l.file},line=${l.head.line},endLine=${l.head.endLine},title=gatecheck: ${describe(l)} in ${escape(l.decl)}::${escape(message)}`;
     })
     .join('\n');
@@ -60,8 +70,9 @@ export function markdown(result: CheckResult, sources: Sources, title: string): 
     out.push(`<details${open ? ' open' : ''}><summary><b>${heading} (${group.length})</b></summary>`, '');
     for (const leak of group) {
       out.push(`**\`${leak.file}:${leak.head.line}\`** · ${describe(leak)} · in \`${leak.decl}\``, '');
-      if (leak.kind === 'outside-projection') {
-        out.push('gatecheck can’t project this file. Review it by hand.', '');
+      const text = note(leak);
+      if (text) {
+        out.push(text, '');
         continue;
       }
       const src = sources.get(leak.file);
@@ -76,9 +87,13 @@ export function markdown(result: CheckResult, sources: Sources, title: string): 
   section('Review by hand', warnings, true);
   section('Allowed', allowed, false);
 
-  if (errors.length) {
-    const comments = [...new Set(errors.map((l) => allowComment(l.file)))].map((c) => `\`${c}\``).join(' or ');
+  const codeErrors = errors.filter((l) => !l.kind.startsWith('test-'));
+  if (codeErrors.length) {
+    const comments = [...new Set(codeErrors.map((l) => allowComment(l.file)))].map((c) => `\`${c}\``).join(' or ');
     out.push(`To fix a leak, move the change behind the new flag. If it's intentional, add ${comments} on the line before it.`, '');
+  }
+  if (errors.some((l) => l.kind === 'test-regression')) {
+    out.push('A failing test means behavior with the flag off changed. Find the change that causes it and move it behind the flag; an allow comment can’t excuse a failing test.', '');
   }
   if (removed.length) {
     out.push('<details><summary>Removed by projection</summary>', '');

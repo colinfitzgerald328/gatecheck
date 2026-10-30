@@ -7,7 +7,7 @@ export type { AdditiveKind, Category, Leak, LeakKind, Span } from './compare.ts'
 export type { PresetSpec } from './presets/types.ts';
 export type { BuiltinPreset } from './presets/index.ts';
 export type { CheckOptions, CheckResult, FileChange, Policy, ReportedLeak, Severity } from './check.ts';
-export { checkFiles, codePathspecs, DEFAULT_ADAPTERS, DEFAULT_POLICY } from './check.ts';
+export { checkFiles, codePathspecs, DEFAULT_ADAPTERS, DEFAULT_POLICY, isTestFile } from './check.ts';
 export { BUILTIN_PRESETS } from './presets/index.ts';
 export { branchChanges, defaultBase, importedOnRef, keyOnRef, readAt, repoRoot } from './git.ts';
 export { checkBranch, type BranchCheck } from './branch.ts';
@@ -26,6 +26,11 @@ export interface Config {
   policy?: CheckOptions['policy'];
   /** What branches are compared to. Default: origin's default branch, else main. */
   base?: string;
+  /** Run the tests on main and on the branch with the new flags off (`gatecheck check --test`). */
+  test?: {
+    /** e.g. `node --test` with a test glob, or "npm test -- --reporter=junit --outputFile={junit}". */
+    command: string;
+  };
   /** Claude Code plugin hooks. */
   hooks?: {
     /** Report leaks in a file right after Claude edits it. Default 'on'. */
@@ -46,3 +51,4 @@ export async function checkSource(
   return { newFlags: result.newFlags, leaks: result.leaks, removed: result.removed.map((r) => r.what) };
 }
 export { runBench, type BenchResult, type Expectation, type Score } from './bench.ts';
+export { parseJUnit, runDynamic, withJUnit, type DynamicOptions, type DynamicResult, type TestOutcome } from './dynamic.ts';

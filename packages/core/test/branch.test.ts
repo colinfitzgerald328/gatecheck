@@ -76,3 +76,12 @@ test('a custom query preset finds its own flag calls', async () => {
   assert.deepEqual(result.newFlags, ['beta']);
   assert.equal(result.leaks.length, 0);
 });
+
+test('test files are left to the dynamic check', async () => {
+  const changes: FileChange[] = [
+    { path: 'api/test/pricing.test.ts', base: "test('a', () => {});\n", head: "test('a', () => {});\ntest('b', () => {});\n" },
+    { path: 'py/tests/test_pricing.py', base: null, head: 'def test_total():\n    assert total() == 1\n' },
+    { path: 'src/__tests__/cart.tsx', base: 'export const x = 1;\n', head: 'export const x = 2;\n' },
+  ];
+  assert.deepEqual((await checkFiles(changes)).leaks, []);
+});

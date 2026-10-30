@@ -17,6 +17,8 @@ export const DEFAULT_POLICY: Required<Policy> = {
   'ungated-deletion': 'error',
   'reachable-addition': 'error',
   'outside-projection': 'warn',
+  'test-regression': 'error',
+  'test-removed': 'warn',
   'optional-field': 'allow',
   'response-field': 'allow',
   'optional-param': 'allow',
@@ -75,6 +77,22 @@ interface CodeFile {
   removed: string[];
 }
 
+/**
+ * Test code doesn't run in production, and a feature usually comes with new tests, so
+ * test files are left out of the static check. `--test` measures what tests show.
+ */
+const TEST_FILES = [
+  /(^|\/)(__tests__|tests?)\//,
+  /\.(test|spec)\.[cm]?[jt]sx?$/,
+  /(^|\/)test_[^/]*\.py$/,
+  /_test\.py$/,
+  /(^|\/)conftest\.py$/,
+];
+
+export function isTestFile(path: string): boolean {
+  return TEST_FILES.some((re) => re.test(path));
+}
+
 const ALLOW = /gatecheck-allow:\s*(.+?)\s*(?:\*\/)?$/;
 
 function adapterFor(path: string, adapters: LanguageAdapter[]): LanguageAdapter | undefined {
@@ -112,6 +130,7 @@ export async function checkFiles(changes: FileChange[], options: CheckOptions = 
 
   for (const change of changes) {
     if (/(^|\/)gatecheck\.config\.[a-z]+$/.test(change.path)) continue; // our own config
+    if (isTestFile(change.path)) continue;
     const lang = adapterFor(change.path, adapters);
     if (!lang) {
       leaks.push({
