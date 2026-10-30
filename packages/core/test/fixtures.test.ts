@@ -8,7 +8,8 @@ const root = new URL('./fixtures/', import.meta.url);
 for (const name of readdirSync(root).sort()) {
   test(name, async () => {
     const read = (file: string) => readFileSync(new URL(`${name}/${file}`, root), 'utf8');
-    const result = await checkSource({ base: read('base.tsx'), head: read('head.tsx') });
+    const ext = readdirSync(new URL(`${name}/`, root)).find((f) => f.startsWith('base.'))!.slice('base'.length);
+    const result = await checkSource({ path: `input${ext}`, base: read(`base${ext}`), head: read(`head${ext}`) });
     const actual = result.leaks.map((l) => ({
       kind: l.kind,
       ...(l.additive ? { additive: l.additive } : {}),

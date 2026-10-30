@@ -1,4 +1,4 @@
-import { checkFiles, type CheckOptions, type CheckResult, type FileChange } from './check.ts';
+import { checkFiles, codePathspecs, DEFAULT_ADAPTERS, type CheckOptions, type CheckResult, type FileChange } from './check.ts';
 import { branchChanges, importedOnRef, keyOnRef } from './git.ts';
 
 export interface BranchCheck {
@@ -16,10 +16,11 @@ export async function checkBranch(
 ): Promise<BranchCheck> {
   const { mergeBase, changes } = branchChanges(root, base, head);
   const changed = changes.map((c) => c.path);
+  const pathspecs = codePathspecs(options.adapters ?? DEFAULT_ADAPTERS);
   const result = await checkFiles(changes, {
     ...options,
-    existsOnBase: (k) => keyOnRef(root, mergeBase, k),
-    importedElsewhere: (p) => importedOnRef(root, head, p, changed),
+    existsOnBase: (k) => keyOnRef(root, mergeBase, k, pathspecs),
+    importedElsewhere: (p, lang) => importedOnRef(root, head, lang.importerPattern(p), changed, pathspecs),
   });
   return { result, changes, mergeBase };
 }

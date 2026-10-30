@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { checkBranch, defaultBase, repoRoot, type CheckResult, type ReportedLeak } from '@gatecheck/core';
 import { findConfig, loadConfig } from './config.ts';
-import { describe } from './formats.ts';
+import { allowComment, describe } from './formats.ts';
 
 interface HookInput {
   cwd: string;
@@ -32,7 +32,7 @@ function report(intro: string, leaks: ReportedLeak[], result: CheckResult, sourc
   out.push(
     `Every behavior change for this feature should only run when its flag (${flags}) is on.`,
     '- If the change is part of the feature, move it behind the flag.',
-    '- If the user asked for it as its own change, keep it and add `// gatecheck-allow: <reason>` on the line before it.',
+    `- If the user asked for it as its own change, keep it and add \`${allowComment(leaks[0].file)}\` on the line before it.`,
     "Don't revert work the user asked for just to clear this check.",
   );
   return out.join('\n');

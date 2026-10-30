@@ -1,0 +1,12 @@
+{
+  "branch": "leak/py-rounding",
+  "base": "main",
+  "labeledBy": "hand, before running gatecheck",
+  "leaks": [
+    {
+      "file": "py/app/services/pricing.py",
+      "line": 6,
+      "category": "ungated-modification"
+    }
+  ]
+}

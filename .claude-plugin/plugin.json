@@ -1,6 +1,6 @@
 {
   "name": "gatecheck",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Catches changes that run with a new feature flag off, while Claude builds the feature.",
   "author": { "name": "Colin FitzGerald" },
   "repository": "https://github.com/colinfitzgerald328/gatecheck",

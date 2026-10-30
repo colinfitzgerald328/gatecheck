@@ -1,0 +1,22 @@
+{
+  "branch": "pass/py-v2-orders",
+  "base": "main",
+  "labeledBy": "hand, before running gatecheck",
+  "leaks": [
+    {
+      "file": "py/app/routes/orders.py",
+      "line": 14,
+      "category": "optional-field"
+    },
+    {
+      "file": "py/app/routes/orders.py",
+      "line": 25,
+      "category": "new-endpoint"
+    },
+    {
+      "file": "py/app/routes/orders.py",
+      "line": 31,
+      "category": "new-endpoint"
+    }
+  ]
+}

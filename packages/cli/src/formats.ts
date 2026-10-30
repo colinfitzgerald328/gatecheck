@@ -9,6 +9,11 @@ export function describe(leak: ReportedLeak): string {
   return leak.additive ? `additive: ${leak.additive}` : leak.kind;
 }
 
+/** The allow comment in the file's own comment syntax. */
+export function allowComment(file: string): string {
+  return `${/\.pyi?$/.test(file) ? '#' : '//'} gatecheck-allow: <reason>`;
+}
+
 export function why(newFlags: string[]): string {
   return newFlags.length ? `Runs with ${newFlags.join(', ')} off` : 'No new flag gates this';
 }
@@ -29,7 +34,7 @@ export function github(result: CheckResult): string {
       const message =
         l.kind === 'outside-projection'
           ? 'gatecheck can’t project this file. Review it by hand.'
-          : `${why(result.newFlags)}. Move it behind a flag, or add // gatecheck-allow: <reason>`;
+          : `${why(result.newFlags)}. Move it behind a flag, or add ${allowComment(l.file)}`;
       return `::${level} file=${l.file},line=${l.head.line},endLine=${l.head.endLine},title=gatecheck: ${describe(l)} in ${escape(l.decl)}::${escape(message)}`;
     })
     .join('\n');
@@ -72,7 +77,8 @@ export function markdown(result: CheckResult, sources: Sources, title: string): 
   section('Allowed', allowed, false);
 
   if (errors.length) {
-    out.push(`To fix a leak, move the change behind the new flag. If it's intentional, add \`// gatecheck-allow: <reason>\` on the line before it.`, '');
+    const comments = [...new Set(errors.map((l) => allowComment(l.file)))].map((c) => `\`${c}\``).join(' or ');
+    out.push(`To fix a leak, move the change behind the new flag. If it's intentional, add ${comments} on the line before it.`, '');
   }
   if (removed.length) {
     out.push('<details><summary>Removed by projection</summary>', '');

@@ -1,0 +1,16 @@
+{
+  "leaks": [
+    {
+      "kind": "reachable-addition",
+      "additive": "new-endpoint",
+      "line": 6,
+      "severity": "allow"
+    },
+    {
+      "kind": "reachable-addition",
+      "additive": "new-endpoint",
+      "line": 12,
+      "severity": "allow"
+    }
+  ]
+}

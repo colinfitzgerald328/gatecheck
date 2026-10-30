@@ -1,0 +1,5 @@
+{
+  "leaks": [
+    { "kind": "reachable-addition", "line": 3, "severity": "error" }
+  ]
+}

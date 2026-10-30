@@ -17,12 +17,15 @@ new flags: expressCheckout
     + return cart.items.reduce((sum, item) => sum + item.price * item.qty, 0) + cart.tax;
 ```
 
-## Status: M2
+## Status: M3
 
-- TS/TSX via tree-sitter (WASM)
+- TypeScript/TSX and Python via tree-sitter (WASM). Python covers `if`/`elif`/`else`,
+  `and`/`or`/`not`, conditional expressions, relative and absolute imports, FastAPI/Flask
+  route decorators and Pydantic/dataclass fields.
 - Presets are tree-sitter query files. LaunchDarkly is built in (`useFlags()` with
   destructuring and camelCase keys, `variation` / `boolVariation` / `variationDetail().value`,
-  `await`, `props.flags.*` from `withLDConsumer`); add your own in the config.
+  `await`, `props.flags.*` from `withLDConsumer`; in Python, `variation` and
+  `variation_detail().value`); add your own in the config, one query per language.
 - Branch-wide check: renames, new and deleted files, imports between files, and new files
   imported by files the branch didn't touch
 - Additive API policy (see below)
@@ -105,17 +108,17 @@ by default; every other leak is an error. Change any of them in `gatecheck.confi
 
 | Category | What it matches | Default |
 |---|---|---|
-| `optional-field` | New `field?: T` on an interface or object type | allow |
-| `response-field` | New key in `res.json({...})`, `Response.json({...})` | allow |
+| `optional-field` | New `field?: T` on an interface or object type; a Pydantic/dataclass field with a default | allow |
+| `response-field` | New key in `res.json({...})`, `Response.json({...})`; in a route handler's returned dict or `JSONResponse({...})` | allow |
 | `optional-param` | New trailing parameter with `?` or a default | allow |
-| `new-endpoint` | `app.get('/path', …)` on a path `main` doesn't serve, plus helpers only it uses | allow |
+| `new-endpoint` | `app.get('/path', …)` or `@router.get("/path")` on a path `main` doesn't serve, plus helpers only it uses | allow |
 | `outside-projection` | A changed file gatecheck can't parse: migrations, `package.json`, config | warn |
 | `ungated-modification` | Existing code that differs with the flag off | error |
 | `ungated-deletion` | Code on `main` that's gone with the flag off | error |
 | `reachable-addition` | New code that still runs with the flag off | error |
 
-A single leak can be allowed in place with `// gatecheck-allow: <reason>` on the line
-before it.
+A single leak can be allowed in place with `// gatecheck-allow: <reason>` (`#` in Python) on
+the line before it.
 
 ## Custom presets
 
@@ -132,8 +135,8 @@ export default {
 
 ## Layout
 
-- `packages/core`: projection, comparison, policy, git, bench. `src/lang/tsx.ts` is the TSX
-  adapter, `src/presets/` holds the query presets.
+- `packages/core`: projection, comparison, policy, git, bench. `src/lang/` holds the language
+  adapters (`tsx.ts`, `python.ts`), `src/presets/` the query presets.
 - `packages/cli`: the `gatecheck` command and its output formats.
 - `bench/expected/`: hand-checked results for each test branch.
 - `action.yml`: the GitHub Action.

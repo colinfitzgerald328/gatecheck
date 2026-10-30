@@ -54,32 +54,27 @@ export function branchChanges(root: string, baseRef: string, headRef?: string): 
   return { mergeBase, changes };
 }
 
-// Only code counts: a key mentioned in a README or a changelog isn't a flag read.
-const CODE_PATHSPECS = ['*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs', '*.cjs'];
-
 /**
  * Whether any file at `ref` mentions the flag, in any key spelling: `expressCheckout`
  * also matches `express-checkout` and `express_checkout`. Over-matching only means a
  * flag is treated as existing, which reports more, never less.
  */
-export function keyOnRef(root: string, ref: string, canonical: string): boolean {
+export function keyOnRef(root: string, ref: string, canonical: string, pathspecs: string[]): boolean {
   const words = canonical.split(/(?=[A-Z])/).map((w) => w.replace(/[^A-Za-z0-9]/g, ''));
   const pattern = words.join('[-_.]?');
-  const result = spawnSync('git', ['grep', '-q', '-i', '-E', pattern, ref, '--', ...CODE_PATHSPECS], { cwd: root });
+  // Only code counts (`pathspecs`): a key mentioned in a README or a changelog isn't a flag read.
+  const result = spawnSync('git', ['grep', '-q', '-i', '-E', pattern, ref, '--', ...pathspecs], { cwd: root });
   return result.status === 0;
 }
 
 /**
  * Whether any file at `ref` (or the working tree) other than the branch's changed
- * files has an import that could point at `path`. Matches on the file name, so it
- * over-matches; that keeps a new file in the check, which reports more, never less.
+ * files has a line matching `pattern`, a language adapter's guess at an import of some
+ * file. The guesses match on file names, so they over-match; that keeps a new file in
+ * the check, which reports more, never less.
  */
-export function importedOnRef(root: string, ref: string | undefined, path: string, changed: string[]): boolean {
-  const base = path.split('/').pop()!.replace(/\.(m|c)?[jt]sx?$/, '');
-  const name = base === 'index' ? path.split('/').at(-2)! : base;
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = `(from|import|require\\()[[:space:]]*\\(?['"][^'"]*/${escaped}(\\.[a-z]+)?['"]`;
-  const args = ['grep', '-l', '-E', pattern, ...(ref ? [ref] : []), '--', ...CODE_PATHSPECS];
+export function importedOnRef(root: string, ref: string | undefined, pattern: string, changed: string[], pathspecs: string[]): boolean {
+  const args = ['grep', '-l', '-E', pattern, ...(ref ? [ref] : []), '--', ...pathspecs];
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
   if (result.status !== 0) return false;
   const exclude = new Set(changed);

@@ -2,6 +2,7 @@ import { posix } from 'node:path';
 import type { LanguageAdapter } from './adapter.ts';
 import { compareTopLevel, type Category, type Leak } from './compare.ts';
 import { canonicalKey } from './flags.ts';
+import { python } from './lang/python.ts';
 import { tsx } from './lang/tsx.ts';
 import { BUILTIN_PRESETS } from './presets/index.ts';
 import type { PresetSpec } from './presets/types.ts';
@@ -21,6 +22,13 @@ export const DEFAULT_POLICY: Required<Policy> = {
   'optional-param': 'allow',
   'new-endpoint': 'allow',
 };
+
+export const DEFAULT_ADAPTERS: LanguageAdapter[] = [tsx, python];
+
+/** File extensions gatecheck can project, as git pathspecs. */
+export function codePathspecs(adapters: LanguageAdapter[] = DEFAULT_ADAPTERS): string[] {
+  return adapters.flatMap((a) => a.extensions.map((e) => `*${e}`));
+}
 
 export interface ReportedLeak extends Leak {
   file: string;
@@ -47,7 +55,7 @@ export interface CheckOptions {
    * Whether a file the branch didn't change might import this new file. Without it,
    * only changed files count as importers.
    */
-  importedElsewhere?: (path: string) => boolean;
+  importedElsewhere?: (path: string, lang: LanguageAdapter) => boolean;
   adapters?: LanguageAdapter[];
 }
 
@@ -71,15 +79,6 @@ const ALLOW = /gatecheck-allow:\s*(.+?)\s*(?:\*\/)?$/;
 
 function adapterFor(path: string, adapters: LanguageAdapter[]): LanguageAdapter | undefined {
   return adapters.find((a) => a.extensions.includes(posix.extname(path)));
-}
-
-/** `./x.js` imported from `src/a.ts` becomes `src/x`, so both sides compare by target. */
-function canonicalSource(from: string, source: string): string {
-  if (!source.startsWith('.')) return source;
-  return posix
-    .normalize(posix.join(posix.dirname(from), source))
-    .replace(/\.(m|c)?[jt]sx?$/, '')
-    .replace(/\/index$/, '');
 }
 
 /**
@@ -106,7 +105,7 @@ function mergeAdjacent(leaks: Leak[]): Leak[] {
 }
 
 export async function checkFiles(changes: FileChange[], options: CheckOptions = {}): Promise<CheckResult> {
-  const { presets = [BUILTIN_PRESETS.launchdarkly], policy, flags, existsOnBase, importedElsewhere, adapters = [tsx] } = options;
+  const { presets = [BUILTIN_PRESETS.launchdarkly], policy, flags, existsOnBase, importedElsewhere, adapters = DEFAULT_ADAPTERS } = options;
   const rules = { ...DEFAULT_POLICY, ...policy };
   const leaks: ReportedLeak[] = [];
   const code: CodeFile[] = [];
@@ -138,12 +137,13 @@ export async function checkFiles(changes: FileChange[], options: CheckOptions = 
 
   // Imports compare by the file they point at, and a renamed file counts as its old self,
   // so a rename alone doesn't make every importer look changed.
-  const stem = (p: string) => p.replace(/\.(m|c)?[jt]sx?$/, '').replace(/\/index$/, '');
-  const renamed = new Map(code.filter((f) => f.change.basePath).map((f) => [stem(f.change.path), stem(f.change.basePath!)]));
+  const renamed = new Map(
+    code.filter((f) => f.change.basePath).map((f) => [f.lang.moduleStem(f.change.path), f.lang.moduleStem(f.change.basePath!)]),
+  );
   for (const f of code) {
-    f.lang.mapImportSources(f.base, (s) => canonicalSource(f.change.basePath ?? f.change.path, s));
+    f.lang.mapImportSources(f.base, (s) => f.lang.resolveImport(f.change.basePath ?? f.change.path, s));
     f.lang.mapImportSources(f.head, (s) => {
-      const target = canonicalSource(f.change.path, s);
+      const target = f.lang.resolveImport(f.change.path, s);
       return renamed.get(target) ?? target;
     });
   }
@@ -161,14 +161,22 @@ export async function checkFiles(changes: FileChange[], options: CheckOptions = 
   // Imports are canonical by now: the target path without extension, old path for renames.
   const byStem = new Map<string, string>();
   for (const f of code) {
-    byStem.set(stem(f.change.path), f.change.path);
-    if (f.change.basePath) byStem.set(stem(f.change.basePath), f.change.path);
+    byStem.set(f.lang.moduleStem(f.change.path), f.change.path);
+    if (f.change.basePath) byStem.set(f.lang.moduleStem(f.change.basePath), f.change.path);
   }
+  const target = (source: string): string | undefined => {
+    if (!source.startsWith('~/')) return byStem.get(source);
+    // Only the end of the path is known; any changed file ending that way may be it.
+    const tail = source.slice(2);
+    for (const [stem, path] of byStem) if (stem === tail || stem.endsWith(`/${tail}`)) return path;
+    return undefined;
+  };
   const empty = (n: N) => !n.children.some((c) => c.named);
   // A new file an untouched file may import keeps all its exports. Asked once per file.
   const elsewhere = new Map<string, boolean>();
   const importedByUntouched = (path: string) => {
-    if (!elsewhere.has(path)) elsewhere.set(path, importedElsewhere?.(path) ?? false);
+    const lang = adapterFor(path, adapters)!;
+    if (!elsewhere.has(path)) elsewhere.set(path, importedElsewhere?.(path, lang) ?? false);
     return elsewhere.get(path)!;
   };
   for (let changed = true; changed; ) {
@@ -176,11 +184,11 @@ export async function checkFiles(changes: FileChange[], options: CheckOptions = 
     const keep = new Map<string, Set<string>>();
     for (const f of code) {
       for (const imp of f.lang.imports(f.head)) {
-        const target = byStem.get(imp.source);
-        if (!target) continue;
-        const names = keep.get(target) ?? new Set<string>();
+        const path = target(imp.source);
+        if (!path) continue;
+        const names = keep.get(path) ?? new Set<string>();
         for (const n of imp.names) names.add(n);
-        keep.set(target, names);
+        keep.set(path, names);
       }
     }
     for (const f of code) {

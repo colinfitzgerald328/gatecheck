@@ -131,3 +131,23 @@ export function lastPos(n: N): Pos | undefined {
   }
   return undefined;
 }
+
+export function parentMap(tree: N): Map<N, N> {
+  const parents = new Map<N, N>();
+  walk(tree, (n, p) => {
+    if (p) parents.set(n, p);
+  });
+  return parents;
+}
+
+/** Removes `n` from its parent and returns the parent. */
+export function removeNode(n: N, parents: Map<N, N>): N | undefined {
+  const p = parents.get(n);
+  if (p) p.children = p.children.filter((c) => c !== n);
+  return p;
+}
+
+export function withField(n: N, field: string | undefined): N {
+  n.field = field;
+  return n;
+}

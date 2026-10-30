@@ -30,6 +30,16 @@ export interface LanguageAdapter {
   imports(tree: N): { source: string; names: string[] }[];
   /** Rewrite every static import/re-export specifier in place. */
   mapImportSources(tree: N, map: (source: string) => string): void;
+  /** A file's identity as a module: `src/x.ts` → `src/x`, `pkg/__init__.py` → `pkg`. */
+  moduleStem(path: string): string;
+  /**
+   * Where an import in `from` points, as a module stem. Prefix `~/` when only the end of
+   * the path is known (Python's `from app.services import x`): it matches any changed
+   * file whose stem ends that way. Imports of packages come back unchanged.
+   */
+  resolveImport(from: string, source: string): string;
+  /** An extended regex for `git grep` that matches lines which may import `path`. */
+  importerPattern(path: string): string;
   /** Fold constants, pick branches, cut dead code, normalize. Applied to both sides. */
   simplify(tree: N): N;
   /** Remove new top-level declarations and imports that nothing reaches any more. */

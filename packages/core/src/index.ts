@@ -7,12 +7,13 @@ export type { AdditiveKind, Category, Leak, LeakKind, Span } from './compare.ts'
 export type { PresetSpec } from './presets/types.ts';
 export type { BuiltinPreset } from './presets/index.ts';
 export type { CheckOptions, CheckResult, FileChange, Policy, ReportedLeak, Severity } from './check.ts';
-export { checkFiles, DEFAULT_POLICY } from './check.ts';
+export { checkFiles, codePathspecs, DEFAULT_ADAPTERS, DEFAULT_POLICY } from './check.ts';
 export { BUILTIN_PRESETS } from './presets/index.ts';
 export { branchChanges, defaultBase, importedOnRef, keyOnRef, readAt, repoRoot } from './git.ts';
 export { checkBranch, type BranchCheck } from './branch.ts';
 export { canonicalKey } from './flags.ts';
 export { tsx } from './lang/tsx.ts';
+export { python } from './lang/python.ts';
 
 /** Shape of gatecheck.config.ts / .json. */
 export interface Config {

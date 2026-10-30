@@ -1,9 +1,10 @@
 import { createRequire } from 'node:module';
+import { posix } from 'node:path';
 import { Language, Parser, Query } from 'web-tree-sitter';
 import type { LanguageAdapter, TopLevelItem } from '../adapter.ts';
 import type { ClassifyInsertion } from '../compare.ts';
 import { bagOff, canonicalKey, isFlagBag, matchRead } from '../flags.ts';
-import { child, clone, fromTreeSitter, leaf, namedChildren, ser, walk, type Comment, type N, type RawTag } from '../tree.ts';
+import { child, clone, fromTreeSitter, leaf, namedChildren, parentMap, removeNode, ser, walk, withField, type Comment, type N, type RawTag } from '../tree.ts';
 
 let parserPromise: Promise<{ parser: Parser; language: Language }> | undefined;
 
@@ -119,28 +120,9 @@ function collectFlagKeys(tree: N): Set<string> {
   return keys;
 }
 
-function parentMap(tree: N): Map<N, N> {
-  const parents = new Map<N, N>();
-  walk(tree, (n, p) => {
-    if (p) parents.set(n, p);
-  });
-  return parents;
-}
-
-function removeNode(n: N, parents: Map<N, N>): N | undefined {
-  const p = parents.get(n);
-  if (p) p.children = p.children.filter((c) => c !== n);
-  return p;
-}
-
 function removeDeclarator(declarator: N, parents: Map<N, N>): void {
   const decl = removeNode(declarator, parents);
   if (decl && !decl.children.some((c) => c.type === 'variable_declarator')) removeNode(decl, parents);
-}
-
-function withField(n: N, field: string | undefined): N {
-  n.field = field;
-  return n;
 }
 
 function substituteFlags(tree: N, newKeys: Set<string>, removed: string[]): void {
@@ -493,8 +475,8 @@ function pureValue(n: N): boolean {
 /**
  * `const total = subtotal` or `const body = { id: o.id }; res.json(body)`: a constant
  * used once reads the same as its value written in place. Inlined when the value has
- * no effects, or when the one use is the declaration right after it. Never into another
- * function, which would read the value later.
+ * no effects, or when the one use is the whole value of the next declaration or return.
+ * Never into another function, which would read the value later.
  */
 function inlineSingleUse(tree: N): void {
   for (let changed = true; changed; ) {
@@ -519,7 +501,12 @@ function inlineSingleUse(tree: N): void {
       for (let p = parents.get(use); p && p !== block; p = parents.get(p)) if (FUNCTIONS.has(p.type)) return;
 
       const next = block.children[block.children.indexOf(decl) + 1];
-      const nextValue = next?.type === 'lexical_declaration' ? next.children.filter((c) => c.type === 'variable_declarator').map((d) => child(d, 'value'))[0] : undefined;
+      const nextValue =
+        next?.type === 'lexical_declaration'
+          ? next.children.filter((c) => c.type === 'variable_declarator').map((d) => child(d, 'value'))[0]
+          : next?.type === 'return_statement'
+            ? namedChildren(next)[0]
+            : undefined;
       if (!pureValue(value) && nextValue !== use) return;
 
       const holder = parents.get(use)!;
@@ -534,10 +521,16 @@ function inlineSingleUse(tree: N): void {
   }
 }
 
-/** A class field nothing reads with `this.<name>`, set to a value with no effects. */
+/**
+ * A React class component's field nothing reads with `this.<name>`, set to a value with
+ * no effects (`state = { sort: 'newest' }` only gated code uses). Components only: on a
+ * data class a new field is part of its shape.
+ */
 function dropUnreadClassFields(tree: N): void {
   walk(tree, (body) => {
     if (body.type !== 'class_body') return;
+    const isComponent = body.children.some((m) => m.type === 'method_definition' && child(m, 'name')?.text === 'render');
+    if (!isComponent) return;
     body.children = body.children.filter((field) => {
       if (field.type !== 'public_field_definition') return true;
       const name = child(field, 'name');
@@ -659,6 +652,19 @@ function importLocalNodes(stmt: N): { spec: N; name: N }[] {
 
 const REFERENCE_TYPES = new Set(['identifier', 'type_identifier', 'shorthand_property_identifier']);
 
+/**
+ * Whether defining this does nothing until it's used. A variable's value runs at load
+ * (`const off = store.subscribe(fn)`), and so does a class decorator.
+ */
+function quietDeclaration(stmt: N): boolean {
+  const decl = unwrapExport(stmt);
+  if (decl.type === 'lexical_declaration' || decl.type === 'variable_declaration') {
+    return decl.children.filter((c) => c.type === 'variable_declarator').every((d) => !child(d, 'value') || quietInitializer(child(d, 'value')!));
+  }
+  if (decl.type === 'class_declaration' || decl.type === 'abstract_class_declaration') return !decl.children.some((c) => c.type === 'decorator');
+  return DECLARATIONS.has(decl.type);
+}
+
 function pruneAdditions(head: N, base: N, removed: string[], keep: Set<string>): void {
   const baseNames = new Set<string>();
   for (const stmt of base.children) {
@@ -698,7 +704,7 @@ function pruneAdditions(head: N, base: N, removed: string[], keep: Set<string>):
         continue;
       }
       const names = declaredNameNodes(stmt);
-      if (names.length > 0 && !exported(stmt) && names.every(unused)) {
+      if (names.length > 0 && !exported(stmt) && names.every(unused) && quietDeclaration(stmt)) {
         removeNode(stmt, parents);
         removed.push(`unreached ${names.map((n) => n.text).join(', ')}`);
         changed = true;
@@ -827,6 +833,23 @@ function insertionClassifier(base: N): ClassifyInsertion {
   };
 }
 
+function moduleStem(path: string): string {
+  return path.replace(/\.(m|c)?[jt]sx?$/, '').replace(/\/index$/, '');
+}
+
+/** `./x.js` imported from `src/a.ts` is `src/x`. */
+function resolveImport(from: string, source: string): string {
+  if (!source.startsWith('.')) return source;
+  return moduleStem(posix.normalize(posix.join(posix.dirname(from), source)));
+}
+
+function importerPattern(path: string): string {
+  const base = path.split('/').pop()!.replace(/\.(m|c)?[jt]sx?$/, '');
+  const name = base === 'index' ? path.split('/').at(-2)! : base;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return `(from|import|require\\()[[:space:]]*\\(?['"][^'"]*/${escaped}(\\.[a-z]+)?['"]`;
+}
+
 export const tsx: LanguageAdapter = {
   id: 'tsx',
   extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
@@ -857,6 +880,9 @@ export const tsx: LanguageAdapter = {
   pruneAdditions,
   imports,
   mapImportSources,
+  moduleStem,
+  resolveImport,
+  importerPattern,
   topLevel,
   insertionClassifier,
 };

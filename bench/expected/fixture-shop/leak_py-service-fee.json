@@ -1,0 +1,22 @@
+{
+  "branch": "leak/py-service-fee",
+  "base": "main",
+  "labeledBy": "hand, before running gatecheck",
+  "leaks": [
+    {
+      "file": "py/app/routes/orders.py",
+      "line": 22,
+      "category": "ungated-modification"
+    },
+    {
+      "file": "py/app/services/fees.py",
+      "line": 1,
+      "category": "reachable-addition"
+    },
+    {
+      "file": "py/app/services/fees.py",
+      "line": 4,
+      "category": "reachable-addition"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "branch": "edge/py-absolute-import",
+  "base": "main",
+  "labeledBy": "hand, before running gatecheck",
+  "leaks": []
+}

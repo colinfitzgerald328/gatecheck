@@ -1,0 +1,6 @@
+{
+  "branch": "pass/py-loyalty",
+  "base": "main",
+  "labeledBy": "hand, before running gatecheck",
+  "leaks": []
+}

@@ -16,7 +16,7 @@ import {
   type Score,
 } from '@gatecheck/core';
 import { findConfig, loadConfig } from './config.ts';
-import { describe, github, markdown, why, type Sources } from './formats.ts';
+import { allowComment, describe, github, markdown, why, type Sources } from './formats.ts';
 import { runHook } from './hook.ts';
 import { runInit } from './init.ts';
 
@@ -90,7 +90,7 @@ function printText(title: string, result: CheckResult, sources: Sources): void {
       if (leak.kind !== 'ungated-deletion') for (const l of snippet(src?.head, leak.head.line, leak.head.endLine)) console.log(green(`    + ${l.trim()}`));
       if (leak.allowed) console.log(dim(`    allowed: ${leak.allowed}`));
       else if (leak.severity === 'error') {
-        console.log(dim(`    ${why(newFlags)}. Move it behind a flag, or add // gatecheck-allow: <reason>`));
+        console.log(dim(`    ${why(newFlags)}. Move it behind a flag, or add ${allowComment(leak.file)}`));
       }
     }
     console.log();

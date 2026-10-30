@@ -19,8 +19,9 @@ Anything that still differs is a leak.
   inside the gate.
 - Keep refactors out of a flagged change. If the feature needs one, say so and suggest doing
   it separately.
-- Allowed without a flag (additive API changes): a new optional field on a type, a new key in a
-  JSON response, a new trailing optional parameter, a new endpoint on a new path.
+- Allowed without a flag (additive API changes): a new optional field on a type (or a Pydantic
+  field with a default), a new key in a JSON response, a new trailing optional parameter, a
+  new endpoint on a new path.
 
 ## When gatecheck reports a leak
 
@@ -28,7 +29,8 @@ The report names the file, line and code. Then:
 
 1. If the change is part of the feature, move it behind the flag.
 2. If the user asked for it as its own change, keep it and add
-   `// gatecheck-allow: <reason>` on the line before it, with the user's reason.
+   `// gatecheck-allow: <reason>` (`# gatecheck-allow: <reason>` in Python) on the line
+   before it, with the user's reason.
 3. Never revert work the user asked for just to clear the check, and never remove or
    rename the flag to get around it.
 

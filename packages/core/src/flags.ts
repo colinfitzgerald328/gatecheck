@@ -18,7 +18,7 @@ export function canonicalKey(key: string): string {
 }
 
 export function matchRead(n: N): FlagRead | null {
-  if (n.type === 'await_expression') {
+  if (n.type === 'await_expression' || n.type === 'await') {
     const inner = namedChildren(n)[0];
     return inner ? matchRead(inner) : null;
   }
