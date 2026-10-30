@@ -4,22 +4,21 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
-  BUILTIN_PRESETS,
-  branchChanges,
+  checkBranch,
   checkFiles,
-  importedOnRef,
-  keyOnRef,
+  defaultBase,
   readAt,
   repoRoot,
   runBench,
   type CheckResult,
-  type Config,
   type Expectation,
-  type PresetSpec,
   type ReportedLeak,
   type Score,
 } from '@gatecheck/core';
+import { findConfig, loadConfig } from './config.ts';
 import { describe, github, markdown, why, type Sources } from './formats.ts';
+import { runHook } from './hook.ts';
+import { runInit } from './init.ts';
 
 const USAGE = `gatecheck: check that new code is fully behind its feature flags
 
@@ -28,9 +27,11 @@ Usage:
   gatecheck file <path> --base <ref>             one file against a git ref
   gatecheck file <base-file> <head-file>         two files
   gatecheck bench <expected-dir> --repo <path>   score against labeled test branches
+  gatecheck init                                 write a gatecheck.config.json here
+  gatecheck hook <post-edit|stop>                Claude Code hooks (reads the event on stdin)
 
 Options:
-  --base <ref>      what the branch is compared to (default: main)
+  --base <ref>      what the branch is compared to (default: config base, origin's default branch, or main)
   --head <ref>      check a ref instead of the working tree
   --flag <key>      project this flag instead of detecting new ones (repeatable)
   --config <path>   config file (default: nearest gatecheck.config.{ts,mjs,json})
@@ -39,36 +40,6 @@ Options:
 
 Exit codes: 0 no errors, 1 leaks at error severity, 2 usage error.
 `;
-
-const CONFIG_NAMES = ['gatecheck.config.ts', 'gatecheck.config.mjs', 'gatecheck.config.js', 'gatecheck.config.json'];
-
-function findConfig(from: string): string | undefined {
-  for (let dir = resolve(from); ; dir = dirname(dir)) {
-    for (const name of CONFIG_NAMES) if (existsSync(join(dir, name))) return join(dir, name);
-    if (dirname(dir) === dir) return undefined;
-  }
-}
-
-async function loadConfig(path: string | undefined): Promise<{ presets: PresetSpec[]; policy: Config['policy'] }> {
-  const config: Config = !path
-    ? {}
-    : path.endsWith('.json')
-      ? JSON.parse(readFileSync(path, 'utf8'))
-      : ((await import(pathToFileURL(resolve(path)).href)).default ?? {});
-  const presets = (config.presets ?? ['launchdarkly']).map((p): PresetSpec => {
-    if (typeof p === 'string') {
-      const builtin = BUILTIN_PRESETS[p];
-      if (!builtin) throw new Error(`Unknown preset "${p}". Built in: ${Object.keys(BUILTIN_PRESETS).join(', ')}`);
-      return builtin;
-    }
-    // A query ending in .scm is a file path, relative to the config file.
-    const queries = Object.fromEntries(
-      Object.entries(p.queries).map(([lang, q]) => [lang, q && /^[^\n]*\.scm$/.test(q) ? readFileSync(resolve(dirname(path!), q), 'utf8') : q]),
-    );
-    return { ...p, queries };
-  });
-  return { presets, policy: config.policy };
-}
 
 const color = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code: number) => (s: string) => (color ? `\x1b[${code}m${s}\x1b[0m` : s);
@@ -165,19 +136,14 @@ async function main(): Promise<number> {
     return values.help ? 0 : 2;
   }
 
+  if (command === 'hook') return runHook(args[0] ?? '');
+  if (command === 'init') return runInit(process.cwd());
+
   if (command === 'check') {
     const root = repoRoot(process.cwd());
-    const { presets, policy } = await loadConfig(values.config ?? findConfig(process.cwd()));
-    const base = values.base ?? 'main';
-    const { mergeBase, changes } = branchChanges(root, base, values.head);
-    const changed = changes.map((c) => c.path);
-    const result = await checkFiles(changes, {
-      presets,
-      policy,
-      flags: values.flag,
-      existsOnBase: (k) => keyOnRef(root, mergeBase, k),
-      importedElsewhere: (p) => importedOnRef(root, values.head, p, changed),
-    });
+    const config = await loadConfig(values.config ?? findConfig(process.cwd()));
+    const base = values.base ?? config.base ?? defaultBase(root);
+    const { result, changes } = await checkBranch(root, base, values.head, { presets: config.presets, policy: config.policy, flags: values.flag });
     const title = `${values.head ?? 'working tree'} vs ${base}, ${changes.length} changed ${changes.length === 1 ? 'file' : 'files'}`;
     output(format, result, new Map(changes.map((c) => [c.path, c])), title);
     return result.leaks.some((l) => l.severity === 'error') ? 1 : 0;

@@ -17,7 +17,7 @@ new flags: expressCheckout
     + return cart.items.reduce((sum, item) => sum + item.price * item.qty, 0) + cart.tax;
 ```
 
-## Status: M1
+## Status: M2
 
 - TS/TSX via tree-sitter (WASM)
 - Presets are tree-sitter query files. LaunchDarkly is built in (`useFlags()` with
@@ -29,6 +29,7 @@ new flags: expressCheckout
 - `gatecheck bench` scores the checker against labeled branches in
   [fixture-shop](https://github.com/colinfitzgerald328/fixture-shop)
 - GitHub Action: PR comment, line annotations, failing check
+- Claude Code plugin: hooks after each edit and before Claude finishes, a skill, `/gatecheck`
 
 Requires Node 23.6+ (runs TypeScript directly, no build step).
 
@@ -39,6 +40,39 @@ npx gatecheck check --base main                 # working tree vs main
 npx gatecheck check --base main --head my-branch
 npx gatecheck bench bench/expected/fixture-shop --repo ../fixture-shop
 ```
+
+## Claude Code plugin
+
+Catches leaks while Claude builds the feature, before anything reaches a PR.
+
+```
+/plugin install gatecheck --marketplace colinfitzgerald328/gatecheck
+```
+
+Then, in each repo where you want it, run `npx gatecheck init` (or add a
+`gatecheck.config.json`). Repos without a config are left alone.
+
+- **After each edit** (`Edit`, `Write`, `MultiEdit`), leaks in that file go back to Claude with
+  the code and the two ways out: move it behind the flag, or keep it with
+  `// gatecheck-allow: <reason>` if the user asked for it separately.
+- **Before Claude finishes**, the whole branch is checked. `"stop": "warn"` (the default)
+  tells you; `"stop": "block"` sends Claude back once to fix the leaks.
+- **Only while building a flagged feature.** With `"requireNewFlag": true` (the default), the
+  hooks stay quiet on branches that don't add a new flag, so ordinary edits aren't flagged.
+- `/gatecheck` shows the branch's full report. The `gatecheck` skill gives Claude the rules
+  for building behind a flag.
+
+```json
+{
+  "base": "origin/main",
+  "presets": ["launchdarkly"],
+  "policy": {},
+  "hooks": { "postEdit": "on", "stop": "warn", "requireNewFlag": true }
+}
+```
+
+Needs Node 23.6+. The plugin installs its dependencies on first use; if Node is missing or
+too old, the hooks do nothing.
 
 ## GitHub Action
 

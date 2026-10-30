@@ -412,6 +412,48 @@ function rules(n: N, parentType: string | undefined): N[] {
 
 const ASSIGNMENTS = new Set(['assignment_expression', 'augmented_assignment_expression', 'update_expression']);
 
+// React hooks with no effect of their own until their values are used.
+const QUIET_HOOKS = new Set(['useState', 'useRef', 'useMemo', 'useCallback', 'useId', 'useReducer', 'useContext']);
+const QUIET_INITIALIZERS = new Set(['arrow_function', 'function_expression', 'array', 'object', 'template_string', 'regex']);
+
+function quietInitializer(n: N): boolean {
+  if (pure(n) || QUIET_INITIALIZERS.has(n.type)) return true;
+  if (n.type === 'call_expression') {
+    const fn = child(n, 'function');
+    const name = fn?.type === 'identifier' ? fn.text : fn?.type === 'member_expression' ? child(fn, 'property')?.text : undefined;
+    return QUIET_HOOKS.has(name ?? '');
+  }
+  return false;
+}
+
+/**
+ * Drops local declarations nothing reads any more, when creating them does nothing
+ * observable: `const [open, setOpen] = useState(false)` that only gated code used.
+ * React requires hooks to run unconditionally, so they can't move inside the gate.
+ */
+function dropUnreadLocals(tree: N): void {
+  for (let changed = true; changed; ) {
+    changed = false;
+    const parents = parentMap(tree);
+    walk(tree, (decl) => {
+      if (decl.type !== 'lexical_declaration') return;
+      const block = parents.get(decl);
+      if (block?.type !== 'statement_block') return;
+      const declarators = decl.children.filter((c) => c.type === 'variable_declarator');
+      if (!declarators.every((d) => child(d, 'value') && quietInitializer(child(d, 'value')!))) return;
+      const nameNodes = new Set(declarators.flatMap((d) => patternNames(child(d, 'name')!)));
+      const names = new Set([...nameNodes].map((n) => n.text!));
+      let read = false;
+      walk(block, (n) => {
+        if (!nameNodes.has(n) && REFERENCE_TYPES.has(n.type) && names.has(n.text!)) read = true;
+      });
+      if (read) return;
+      block.children = block.children.filter((c) => c !== decl);
+      changed = true;
+    });
+  }
+}
+
 /**
  * Agents often turn `const x` into `let x` so the gated branch can reassign it.
  * Once the branch is projected away nothing reassigns it, so it's a `const` again.
@@ -446,6 +488,7 @@ function simplify(tree: N): N {
     before = ser(current);
     current = rewrite(current, undefined)[0];
   }
+  dropUnreadLocals(current);
   constifyLets(current);
   return current;
 }

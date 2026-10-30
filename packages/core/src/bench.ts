@@ -1,6 +1,6 @@
-import { checkFiles, type CheckOptions } from './check.ts';
+import { checkBranch } from './branch.ts';
+import type { CheckOptions } from './check.ts';
 import type { Category } from './compare.ts';
-import { branchChanges, importedOnRef, keyOnRef } from './git.ts';
 
 /** Hand-labeled result for one test branch. */
 export interface Expectation {
@@ -31,7 +31,11 @@ export interface BenchResult {
 
 const id = (l: { file: string; line: number; category: Category }) => `${l.file}:${l.line} ${l.category}`;
 
-export async function runBench(root: string, expectations: Expectation[], options: Omit<CheckOptions, 'existsOnBase'> = {}): Promise<BenchResult> {
+export async function runBench(
+  root: string,
+  expectations: Expectation[],
+  options: Omit<CheckOptions, 'existsOnBase' | 'importedElsewhere'> = {},
+): Promise<BenchResult> {
   const byCategory = new Map<Category, Score>();
   const bump = (category: Category, key: keyof Score) => {
     const s = byCategory.get(category) ?? { tp: 0, fp: 0, fn: 0 };
@@ -41,13 +45,7 @@ export async function runBench(root: string, expectations: Expectation[], option
   const branches: BranchScore[] = [];
 
   for (const exp of expectations) {
-    const { mergeBase, changes } = branchChanges(root, exp.base ?? 'main', exp.branch);
-    const changed = changes.map((c) => c.path);
-    const result = await checkFiles(changes, {
-      ...options,
-      existsOnBase: (k) => keyOnRef(root, mergeBase, k),
-      importedElsewhere: (p) => importedOnRef(root, exp.branch, p, changed),
-    });
+    const { result } = await checkBranch(root, exp.base ?? 'main', exp.branch, options);
     const actual = result.leaks.map((l) => ({ file: l.file, line: l.head.line, category: l.additive ?? l.kind }));
     const expected = new Map(exp.leaks.map((l) => [id(l), l]));
     const reported = new Map(actual.map((l) => [id(l), l]));

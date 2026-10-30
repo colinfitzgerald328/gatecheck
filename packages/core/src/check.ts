@@ -82,6 +82,29 @@ function canonicalSource(from: string, source: string): string {
     .replace(/\/index$/, '');
 }
 
+/**
+ * One change often touches neighboring statements (split a line into two, add a guard
+ * and its body). Report it once, so one allow comment covers it.
+ */
+function mergeAdjacent(leaks: Leak[]): Leak[] {
+  const out: Leak[] = [];
+  for (const leak of [...leaks].sort((a, b) => a.head.line - b.head.line)) {
+    const prev = out.at(-1);
+    const sameKind = prev && prev.decl === leak.decl && prev.kind === leak.kind && prev.kind !== 'ungated-deletion' && !prev.additive && !leak.additive;
+    if (prev && sameKind && leak.head.line <= prev.head.endLine + 1) {
+      prev.head = { line: prev.head.line, endLine: Math.max(prev.head.endLine, leak.head.endLine) };
+      if (leak.base) {
+        prev.base = prev.base
+          ? { line: Math.min(prev.base.line, leak.base.line), endLine: Math.max(prev.base.endLine, leak.base.endLine) }
+          : leak.base;
+      }
+      continue;
+    }
+    out.push({ ...leak });
+  }
+  return out;
+}
+
 export async function checkFiles(changes: FileChange[], options: CheckOptions = {}): Promise<CheckResult> {
   const { presets = [BUILTIN_PRESETS.launchdarkly], policy, flags, existsOnBase, importedElsewhere, adapters = [tsx] } = options;
   const rules = { ...DEFAULT_POLICY, ...policy };
@@ -89,6 +112,7 @@ export async function checkFiles(changes: FileChange[], options: CheckOptions = 
   const code: CodeFile[] = [];
 
   for (const change of changes) {
+    if (/(^|\/)gatecheck\.config\.[a-z]+$/.test(change.path)) continue; // our own config
     const lang = adapterFor(change.path, adapters);
     if (!lang) {
       leaks.push({
@@ -176,7 +200,7 @@ export async function checkFiles(changes: FileChange[], options: CheckOptions = 
   }
 
   for (const f of code) {
-    const found = compareTopLevel(f.lang.topLevel(f.base), f.lang.topLevel(f.head), f.head, f.lang.insertionClassifier(f.base));
+    const found = mergeAdjacent(compareTopLevel(f.lang.topLevel(f.base), f.lang.topLevel(f.head), f.head, f.lang.insertionClassifier(f.base)));
     // An allow comment covers a leak that starts on its line or the line after.
     const allows = f.comments.flatMap((c) => {
       const m = ALLOW.exec(c.text);

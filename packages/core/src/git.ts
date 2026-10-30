@@ -89,3 +89,13 @@ export function importedOnRef(root: string, ref: string | undefined, path: strin
     .map((line) => (ref ? line.slice(ref.length + 1) : line))
     .some((file) => !exclude.has(file));
 }
+
+/** origin's default branch if it's known, else `main`, else `master`. */
+export function defaultBase(root: string): string {
+  const head = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { cwd: root, encoding: 'utf8' });
+  if (head.status === 0 && head.stdout.trim()) return head.stdout.trim();
+  for (const ref of ['main', 'master']) {
+    if (spawnSync('git', ['rev-parse', '--verify', '--quiet', ref], { cwd: root }).status === 0) return ref;
+  }
+  return 'main';
+}

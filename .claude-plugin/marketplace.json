@@ -1,0 +1,11 @@
+{
+  "name": "gatecheck",
+  "owner": { "name": "Colin FitzGerald" },
+  "plugins": [
+    {
+      "name": "gatecheck",
+      "source": "./",
+      "description": "Catches changes that run with a new feature flag off, while Claude builds the feature."
+    }
+  ]
+}
