@@ -17,21 +17,51 @@ new flags: expressCheckout
     + return cart.items.reduce((sum, item) => sum + item.price * item.qty, 0) + cart.tax;
 ```
 
-## Status: M0
+## Status: M1
 
-- TS/TSX via tree-sitter (WASM), LaunchDarkly preset (`useFlags()` with destructuring and
-  camelCase keys, `variation` / `boolVariation` / `variationDetail().value`, `await`)
-- Single-file check: `gatecheck file <path> --base <ref>` or `gatecheck file <base> <head>`
+- TS/TSX via tree-sitter (WASM)
+- Presets are tree-sitter query files. LaunchDarkly is built in (`useFlags()` with
+  destructuring and camelCase keys, `variation` / `boolVariation` / `variationDetail().value`,
+  `await`, `props.flags.*` from `withLDConsumer`); add your own in the config.
+- Branch-wide check: renames, new and deleted files, imports between files, and new files
+  imported by files the branch didn't touch
 - Additive API policy (see below)
-- 27 golden fixtures in `packages/core/test/fixtures`
+- `gatecheck bench` scores the checker against labeled branches in
+  [fixture-shop](https://github.com/colinfitzgerald328/fixture-shop)
+- GitHub Action: PR comment, line annotations, failing check
 
 Requires Node 23.6+ (runs TypeScript directly, no build step).
 
 ```
 npm install
 npm test
-npx gatecheck file <path> --base main
+npx gatecheck check --base main                 # working tree vs main
+npx gatecheck check --base main --head my-branch
+npx gatecheck bench bench/expected/fixture-shop --repo ../fixture-shop
 ```
+
+## GitHub Action
+
+```yaml
+# .github/workflows/gatecheck.yml
+name: gatecheck
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  gatecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: colinfitzgerald328/gatecheck@main
+```
+
+The action posts one comment per PR and updates it on each push, annotates each leak on
+the changed lines, and fails the check when a leak is at `error` severity.
 
 ## Policy
 
@@ -45,6 +75,7 @@ by default; every other leak is an error. Change any of them in `gatecheck.confi
 | `response-field` | New key in `res.json({...})`, `Response.json({...})` | allow |
 | `optional-param` | New trailing parameter with `?` or a default | allow |
 | `new-endpoint` | `app.get('/path', …)` on a path `main` doesn't serve, plus helpers only it uses | allow |
+| `outside-projection` | A changed file gatecheck can't parse: migrations, `package.json`, config | warn |
 | `ungated-modification` | Existing code that differs with the flag off | error |
 | `ungated-deletion` | Code on `main` that's gone with the flag off | error |
 | `reachable-addition` | New code that still runs with the flag off | error |
@@ -52,9 +83,24 @@ by default; every other leak is an error. Change any of them in `gatecheck.confi
 A single leak can be allowed in place with `// gatecheck-allow: <reason>` on the line
 before it.
 
+## Custom presets
+
+A preset is a tree-sitter query that tags flag reads. Captures are documented in
+`packages/core/src/presets/types.ts`; `packages/core/src/presets/launchdarkly.tsx.scm` is a
+full example.
+
+```ts
+// gatecheck.config.ts
+export default {
+  presets: ['launchdarkly', { vendor: 'acme', queries: { tsx: './acme.tsx.scm' } }],
+};
+```
+
 ## Layout
 
-- `packages/core`: projection, comparison, policy. `src/lang/tsx.ts` is the TSX adapter,
-  `src/presets/launchdarkly.ts` the LaunchDarkly preset.
-- `packages/cli`: the `gatecheck` command.
+- `packages/core`: projection, comparison, policy, git, bench. `src/lang/tsx.ts` is the TSX
+  adapter, `src/presets/` holds the query presets.
+- `packages/cli`: the `gatecheck` command and its output formats.
+- `bench/expected/`: hand-checked results for each test branch.
+- `action.yml`: the GitHub Action.
 - Test codebase: `../fixture-shop`, one branch per test PR.

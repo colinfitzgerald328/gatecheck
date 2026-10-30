@@ -1,0 +1,11 @@
+{
+  "branch": "leak/express-pay-tax",
+  "base": "main",
+  "leaks": [
+    {
+      "file": "web/src/components/Checkout.tsx",
+      "line": 19,
+      "category": "ungated-modification"
+    }
+  ]
+}

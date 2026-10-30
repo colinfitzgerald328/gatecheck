@@ -5,6 +5,9 @@ export interface Pos {
   column: number;
 }
 
+/** Set at parse time by preset queries. */
+export type FlagTag = { kind: 'read'; key: string; off: N } | { kind: 'bag' };
+
 /**
  * A mutable copy of the tree-sitter tree. Projection rewrites this tree in place;
  * nodes that survive keep their original positions so leaks map back to real lines.
@@ -12,6 +15,7 @@ export interface Pos {
  */
 export interface N {
   type: string;
+  flag?: FlagTag;
   named: boolean;
   field?: string;
   text?: string; // leaves only
@@ -25,8 +29,17 @@ export interface Comment {
   text: string;
 }
 
-export function fromTreeSitter(root: TSNode, comments: Comment[]): N {
+/** What a preset query found, keyed by tree-sitter node id. */
+export type RawTag = { kind: 'read'; key: string; fallbackId?: number } | { kind: 'bag' };
+
+export function fromTreeSitter(root: TSNode, comments: Comment[], tags = new Map<number, RawTag>()): N {
+  const byId = new Map<number, N>();
   const convert = (node: TSNode, field: string | undefined): N => {
+    const n = convertNode(node, field);
+    byId.set(node.id, n);
+    return n;
+  };
+  const convertNode = (node: TSNode, field: string | undefined): N => {
     const n: N = {
       type: node.type,
       named: node.isNamed,
@@ -54,7 +67,17 @@ export function fromTreeSitter(root: TSNode, comments: Comment[]): N {
     }
     return n;
   };
-  return convert(root, undefined);
+  const tree = convert(root, undefined);
+  for (const [id, tag] of tags) {
+    const n = byId.get(id);
+    if (!n) continue;
+    if (tag.kind === 'bag') n.flag = tag;
+    else {
+      const fallback = tag.fallbackId === undefined ? undefined : byId.get(tag.fallbackId);
+      n.flag = { kind: 'read', key: tag.key, off: fallback ? clone(fallback) : leaf('false', 'false') };
+    }
+  }
+  return tree;
 }
 
 export function leaf(type: string, text: string, named = true): N {

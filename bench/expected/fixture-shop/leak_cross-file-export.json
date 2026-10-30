@@ -1,0 +1,16 @@
+{
+  "branch": "leak/cross-file-export",
+  "base": "main",
+  "leaks": [
+    {
+      "file": "web/src/components/Summary.tsx",
+      "line": 3,
+      "category": "reachable-addition"
+    },
+    {
+      "file": "web/src/lib/money.ts",
+      "line": 1,
+      "category": "reachable-addition"
+    }
+  ]
+}

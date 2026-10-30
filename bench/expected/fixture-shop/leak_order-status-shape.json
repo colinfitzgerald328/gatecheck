@@ -1,0 +1,11 @@
+{
+  "branch": "leak/order-status-shape",
+  "base": "main",
+  "leaks": [
+    {
+      "file": "api/src/routes/orders.ts",
+      "line": 26,
+      "category": "ungated-modification"
+    }
+  ]
+}

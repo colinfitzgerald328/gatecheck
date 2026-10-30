@@ -1,7 +1,7 @@
 import type { TopLevelItem } from './adapter.ts';
 import { firstPos, lastPos, ser, type N, type Pos } from './tree.ts';
 
-export type LeakKind = 'ungated-modification' | 'ungated-deletion' | 'reachable-addition';
+export type LeakKind = 'ungated-modification' | 'ungated-deletion' | 'reachable-addition' | 'outside-projection';
 
 /** Ungated changes that can't break an existing caller. Each one has its own policy setting. */
 export type AdditiveKind = 'optional-field' | 'response-field' | 'optional-param' | 'new-endpoint';
@@ -120,6 +120,7 @@ export function compareTopLevel(
   const leaks: Leak[] = [];
   for (const [key, h] of head) {
     const b = base.get(key);
+    if (!b && h.importOnly) continue;
     if (b) diffNodes(b.node, h.node, h.label, undefined, leaks, [root], classify);
     else {
       const leak: Leak = { kind: 'reachable-addition', additive: classify(h.node, [root]), decl: h.label, head: span(h.node, undefined) };
@@ -129,7 +130,7 @@ export function compareTopLevel(
   }
   inheritAdditive(leaks, root);
   for (const [key, b] of base) {
-    if (head.has(key)) continue;
+    if (head.has(key) || b.importOnly) continue;
     // Report removed code where it used to be: after the item before it on main, or before the one after.
     const keys = [...base.keys()];
     const index = keys.indexOf(key);

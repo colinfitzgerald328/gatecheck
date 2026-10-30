@@ -1,0 +1,74 @@
+name: gatecheck
+description: Check that new code in a pull request is fully behind its feature flags.
+branding:
+  icon: flag
+  color: blue
+
+inputs:
+  base:
+    description: Ref the PR is compared to. Defaults to origin/<PR base branch>.
+    default: ''
+  config:
+    description: Path to a gatecheck config file. Defaults to the nearest gatecheck.config.*.
+    default: ''
+  comment:
+    description: Post the report as a PR comment, updated on each push.
+    default: 'true'
+  github-token:
+    description: Token used to post the comment. Needs pull-requests write.
+    default: ${{ github.token }}
+
+outputs:
+  status:
+    description: 0 no errors, 1 leaks at error severity, 2 gatecheck failed to run.
+    value: ${{ steps.check.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '25'
+
+    - name: Install gatecheck
+      shell: bash
+      run: npm ci --prefix "$GITHUB_ACTION_PATH" --no-audit --no-fund --loglevel=error
+
+    - name: Run gatecheck
+      id: check
+      shell: bash
+      env:
+        BASE: ${{ inputs.base || format('origin/{0}', github.base_ref) }}
+        CONFIG: ${{ inputs.config }}
+      run: |
+        args=(check --base "$BASE" --head HEAD)
+        [ -n "$CONFIG" ] && args+=(--config "$CONFIG")
+        gatecheck() { node "$GITHUB_ACTION_PATH/packages/cli/src/main.ts" "$@"; }
+        set +e
+        gatecheck "${args[@]}" --format github
+        gatecheck "${args[@]}" --format markdown > "$RUNNER_TEMP/gatecheck.md"
+        status=$?
+        set -e
+        cat "$RUNNER_TEMP/gatecheck.md" >> "$GITHUB_STEP_SUMMARY"
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+
+    - name: Comment on the PR
+      if: inputs.comment == 'true' && github.event_name == 'pull_request' && steps.check.outputs.status != '2'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        # Update gatecheck's earlier comment if there is one, so the PR keeps a single report.
+        id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq '.[] | select(.body | startswith("<!-- gatecheck -->")) | .id' | head -n1)
+        if [ -n "$id" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@"$RUNNER_TEMP/gatecheck.md" > /dev/null
+        else
+          gh pr comment "$PR" --repo "$REPO" --body-file "$RUNNER_TEMP/gatecheck.md"
+        fi || echo "::warning::gatecheck couldn't comment. Forked PRs get a read-only token; the report is in the job summary."
+
+    - name: Fail on leaks
+      shell: bash
+      run: exit ${{ steps.check.outputs.status }}

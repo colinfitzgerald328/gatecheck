@@ -1,23 +1,16 @@
-import type { N } from '../tree.ts';
-
-export interface FlagRead {
-  key: string;
-  /** What the expression evaluates to when the flag is off. */
-  off: N;
-}
-
 /**
- * How one vendor's SDK reads flags. M0 matches in code; M1 moves the simple
- * call patterns to tree-sitter queries so users can add their own.
+ * A vendor preset: tree-sitter queries, one per language, that find flag reads.
+ *
+ * Captures:
+ *   @read      an expression that evaluates to the flag's value
+ *   @key       the flag key (a string literal or property name) inside @read
+ *   @fallback  optional; the value @read has when the flag is off. Without it, `false`.
+ *   @bag       an expression returning every flag as an object, like `useFlags()`.
+ *              Properties destructured or read from it are flag reads.
+ *
+ * Captures starting with `_` are for predicates only.
  */
-export interface FlagPreset {
+export interface PresetSpec {
   vendor: string;
-  /** Keys are compared in this form, so `express-checkout` and `expressCheckout` match. */
-  canonicalKey(key: string): string;
-  /** A complete flag read, e.g. `ldClient.variation('k', ctx, false)`. */
-  matchRead(n: N): FlagRead | null;
-  /** A call returning every flag as an object, e.g. `useFlags()`. */
-  isFlagBag(n: N): boolean;
-  /** Off value for a key read from the flag bag. */
-  bagOff(): N;
+  queries: Partial<Record<string, string>>;
 }

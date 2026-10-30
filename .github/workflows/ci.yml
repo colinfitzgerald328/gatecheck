@@ -1,0 +1,31 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '25'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Check out fixture-shop
+        uses: actions/checkout@v4
+        with:
+          repository: colinfitzgerald328/fixture-shop
+          path: fixture-shop
+          fetch-depth: 0
+      - name: Make its test branches local
+        working-directory: fixture-shop
+        run: |
+          for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin | grep -v -e '^origin$' -e '^origin/HEAD$' -e '^origin/main$'); do
+            git branch --force "${ref#origin/}" "$ref"
+          done
+      - run: npx gatecheck bench bench/expected/fixture-shop --repo fixture-shop

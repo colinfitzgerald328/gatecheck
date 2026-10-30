@@ -1,0 +1,16 @@
+{
+  "branch": "edge/existing-flag-elsewhere",
+  "base": "main",
+  "leaks": [
+    {
+      "file": "web/src/components/Checkout.tsx",
+      "line": 6,
+      "category": "ungated-modification"
+    },
+    {
+      "file": "web/src/components/Checkout.tsx",
+      "line": 12,
+      "category": "ungated-modification"
+    }
+  ]
+}

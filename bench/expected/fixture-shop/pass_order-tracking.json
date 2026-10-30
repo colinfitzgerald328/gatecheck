@@ -1,0 +1,11 @@
+{
+  "branch": "pass/order-tracking",
+  "base": "main",
+  "leaks": [
+    {
+      "file": "migrations/002_tracking.sql",
+      "line": 1,
+      "category": "outside-projection"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+import { checkFiles, type CheckOptions } from './check.ts';
+import type { Category } from './compare.ts';
+import { branchChanges, importedOnRef, keyOnRef } from './git.ts';
+
+/** Hand-labeled result for one test branch. */
+export interface Expectation {
+  branch: string;
+  base?: string;
+  leaks: { file: string; line: number; category: Category }[];
+}
+
+export interface Score {
+  tp: number;
+  fp: number;
+  fn: number;
+}
+
+export interface BranchScore extends Score {
+  branch: string;
+  /** Reported but not expected. */
+  extra: string[];
+  /** Expected but not reported. */
+  missed: string[];
+}
+
+export interface BenchResult {
+  branches: BranchScore[];
+  byCategory: Map<Category, Score>;
+  total: Score;
+}
+
+const id = (l: { file: string; line: number; category: Category }) => `${l.file}:${l.line} ${l.category}`;
+
+export async function runBench(root: string, expectations: Expectation[], options: Omit<CheckOptions, 'existsOnBase'> = {}): Promise<BenchResult> {
+  const byCategory = new Map<Category, Score>();
+  const bump = (category: Category, key: keyof Score) => {
+    const s = byCategory.get(category) ?? { tp: 0, fp: 0, fn: 0 };
+    s[key]++;
+    byCategory.set(category, s);
+  };
+  const branches: BranchScore[] = [];
+
+  for (const exp of expectations) {
+    const { mergeBase, changes } = branchChanges(root, exp.base ?? 'main', exp.branch);
+    const changed = changes.map((c) => c.path);
+    const result = await checkFiles(changes, {
+      ...options,
+      existsOnBase: (k) => keyOnRef(root, mergeBase, k),
+      importedElsewhere: (p) => importedOnRef(root, exp.branch, p, changed),
+    });
+    const actual = result.leaks.map((l) => ({ file: l.file, line: l.head.line, category: l.additive ?? l.kind }));
+    const expected = new Map(exp.leaks.map((l) => [id(l), l]));
+    const reported = new Map(actual.map((l) => [id(l), l]));
+
+    const score: BranchScore = { branch: exp.branch, tp: 0, fp: 0, fn: 0, extra: [], missed: [] };
+    for (const [key, l] of reported) {
+      if (expected.has(key)) {
+        score.tp++;
+        bump(l.category, 'tp');
+      } else {
+        score.fp++;
+        score.extra.push(key);
+        bump(l.category, 'fp');
+      }
+    }
+    for (const [key, l] of expected) {
+      if (reported.has(key)) continue;
+      score.fn++;
+      score.missed.push(key);
+      bump(l.category, 'fn');
+    }
+    branches.push(score);
+  }
+
+  const total = branches.reduce((t, b) => ({ tp: t.tp + b.tp, fp: t.fp + b.fp, fn: t.fn + b.fn }), { tp: 0, fp: 0, fn: 0 });
+  return { branches, byCategory, total };
+}

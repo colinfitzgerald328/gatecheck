@@ -1,22 +1,41 @@
 import { createRequire } from 'node:module';
-import { Language, Parser } from 'web-tree-sitter';
+import { Language, Parser, Query } from 'web-tree-sitter';
 import type { LanguageAdapter, TopLevelItem } from '../adapter.ts';
 import type { ClassifyInsertion } from '../compare.ts';
-import type { FlagPreset } from '../presets/types.ts';
-import { child, clone, fromTreeSitter, leaf, namedChildren, ser, walk, type Comment, type N } from '../tree.ts';
+import { bagOff, canonicalKey, isFlagBag, matchRead } from '../flags.ts';
+import { child, clone, fromTreeSitter, leaf, namedChildren, ser, walk, type Comment, type N, type RawTag } from '../tree.ts';
 
-let parserPromise: Promise<Parser> | undefined;
+let parserPromise: Promise<{ parser: Parser; language: Language }> | undefined;
 
-function getParser(): Promise<Parser> {
+function getParser(): Promise<{ parser: Parser; language: Language }> {
   parserPromise ??= (async () => {
     await Parser.init();
     const require = createRequire(import.meta.url);
-    const lang = await Language.load(require.resolve('tree-sitter-typescript/tree-sitter-tsx.wasm'));
+    const language = await Language.load(require.resolve('tree-sitter-typescript/tree-sitter-tsx.wasm'));
     const parser = new Parser();
-    parser.setLanguage(lang);
-    return parser;
+    parser.setLanguage(language);
+    return { parser, language };
   })();
   return parserPromise;
+}
+
+const queryCache = new Map<string, Query>();
+
+function compile(language: Language, source: string, vendor: string): Query {
+  let query = queryCache.get(source);
+  if (!query) {
+    try {
+      query = new Query(language, source);
+    } catch (err) {
+      throw new Error(`Invalid tsx query in preset "${vendor}": ${(err as Error).message}`);
+    }
+    queryCache.set(source, query);
+  }
+  return query;
+}
+
+function keyText(node: { type: string; text: string }): string {
+  return node.type === 'string' ? node.text.slice(1, -1) : node.text;
 }
 
 // ---------------------------------------------------------------------------
@@ -29,7 +48,7 @@ type Alias =
 
 const SCOPES = new Set(['program', 'statement_block']);
 
-function collectAliases(tree: N, preset: FlagPreset): Alias[] {
+function collectAliases(tree: N): Alias[] {
   const aliases: Alias[] = [];
   const visit = (n: N, scope: N) => {
     const inner = SCOPES.has(n.type) ? n : scope;
@@ -37,17 +56,17 @@ function collectAliases(tree: N, preset: FlagPreset): Alias[] {
       const name = child(n, 'name');
       const value = child(n, 'value');
       if (name && value) {
-        if (preset.isFlagBag(value)) {
+        if (isFlagBag(value)) {
           if (name.type === 'identifier') {
             aliases.push({ kind: 'bag', scope, name: name.text!, declarator: n });
           } else if (name.type === 'object_pattern') {
             for (const prop of namedChildren(name)) {
-              const a = destructuredAlias(prop, preset);
+              const a = destructuredAlias(prop);
               if (a) aliases.push({ kind: 'scalar', scope, declarator: n, patternProp: prop, ...a });
             }
           }
         } else if (name.type === 'identifier') {
-          const read = preset.matchRead(value);
+          const read = matchRead(value);
           if (read) aliases.push({ kind: 'scalar', scope, name: name.text!, key: read.key, off: read.off, declarator: n });
         }
       }
@@ -59,14 +78,14 @@ function collectAliases(tree: N, preset: FlagPreset): Alias[] {
 }
 
 /** `{ a }`, `{ a: b }`, `{ a = dflt }` inside `const {...} = useFlags()`. */
-function destructuredAlias(prop: N, preset: FlagPreset): { name: string; key: string; off: N } | null {
+function destructuredAlias(prop: N): { name: string; key: string; off: N } | null {
   if (prop.type === 'shorthand_property_identifier_pattern') {
-    return { name: prop.text!, key: prop.text!, off: preset.bagOff() };
+    return { name: prop.text!, key: prop.text!, off: bagOff() };
   }
   if (prop.type === 'pair_pattern') {
     const key = child(prop, 'key');
     const value = child(prop, 'value');
-    if (key && value?.type === 'identifier') return { name: value.text!, key: key.text!, off: preset.bagOff() };
+    if (key && value?.type === 'identifier') return { name: value.text!, key: key.text!, off: bagOff() };
   }
   if (prop.type === 'object_assignment_pattern') {
     // A brand-new flag is missing from the bag, so the default applies.
@@ -86,16 +105,16 @@ function bagMemberKey(n: N, bagNames: Set<string>): string | undefined {
   return child(n, 'property')?.text;
 }
 
-function collectFlagKeys(tree: N, preset: FlagPreset): Set<string> {
+function collectFlagKeys(tree: N): Set<string> {
   const keys = new Set<string>();
-  const aliases = collectAliases(tree, preset);
+  const aliases = collectAliases(tree);
   const bagNames = new Set(aliases.filter((a) => a.kind === 'bag').map((a) => a.name));
-  for (const a of aliases) if (a.kind === 'scalar') keys.add(preset.canonicalKey(a.key));
+  for (const a of aliases) if (a.kind === 'scalar') keys.add(canonicalKey(a.key));
   walk(tree, (n) => {
-    const read = preset.matchRead(n);
-    if (read) keys.add(preset.canonicalKey(read.key));
+    const read = matchRead(n);
+    if (read) keys.add(canonicalKey(read.key));
     const bagKey = bagMemberKey(n, bagNames);
-    if (bagKey) keys.add(preset.canonicalKey(bagKey));
+    if (bagKey) keys.add(canonicalKey(bagKey));
   });
   return keys;
 }
@@ -124,9 +143,9 @@ function withField(n: N, field: string | undefined): N {
   return n;
 }
 
-function substituteFlags(tree: N, preset: FlagPreset, newKeys: Set<string>, removed: string[]): void {
-  const isNew = (key: string) => newKeys.has(preset.canonicalKey(key));
-  const aliases = collectAliases(tree, preset);
+function substituteFlags(tree: N, newKeys: Set<string>, removed: string[]): void {
+  const isNew = (key: string) => newKeys.has(canonicalKey(key));
+  const aliases = collectAliases(tree);
   let parents = parentMap(tree);
 
   // 1. Drop alias declarations for new flags.
@@ -162,7 +181,7 @@ function substituteFlags(tree: N, preset: FlagPreset, newKeys: Set<string>, remo
       if (bagName) {
         const key = bagMemberKey(c, new Set([bagName]));
         if (key && isNew(key)) {
-          n.children[i] = withField(preset.bagOff(), c.field);
+          n.children[i] = withField(bagOff(), c.field);
           continue;
         }
       }
@@ -175,7 +194,7 @@ function substituteFlags(tree: N, preset: FlagPreset, newKeys: Set<string>, remo
   // 3. Replace direct reads like `await client.variation('k', ctx, false)`.
   const replaceReads = (n: N) => {
     for (let i = 0; i < n.children.length; i++) {
-      const read = preset.matchRead(n.children[i]);
+      const read = matchRead(n.children[i]);
       if (read && isNew(read.key)) {
         n.children[i] = withField(clone(read.off), n.children[i].field);
       } else {
@@ -492,7 +511,7 @@ function importLocalNodes(stmt: N): { spec: N; name: N }[] {
 
 const REFERENCE_TYPES = new Set(['identifier', 'type_identifier', 'shorthand_property_identifier']);
 
-function pruneAdditions(head: N, base: N, removed: string[]): void {
+function pruneAdditions(head: N, base: N, removed: string[], keep: Set<string>): void {
   const baseNames = new Set<string>();
   for (const stmt of base.children) {
     for (const n of declaredNameNodes(stmt)) baseNames.add(n.text!);
@@ -510,7 +529,9 @@ function pruneAdditions(head: N, base: N, removed: string[]): void {
       for (const c of n.children) count(c);
     };
     count(head);
-    const unused = (name: N) => !baseNames.has(name.text!) && !refs.get(name.text!);
+    // `keep` holds names other files import from this one; `*` means a namespace import.
+    const exported = (stmt: N) => stmt.type === 'export_statement' && keep.has('*');
+    const unused = (name: N) => !baseNames.has(name.text!) && !refs.get(name.text!) && !keep.has(name.text!);
 
     const parents = parentMap(head);
     for (const stmt of [...head.children]) {
@@ -529,12 +550,46 @@ function pruneAdditions(head: N, base: N, removed: string[]): void {
         continue;
       }
       const names = declaredNameNodes(stmt);
-      if (names.length > 0 && names.every(unused)) {
+      if (names.length > 0 && !exported(stmt) && names.every(unused)) {
         removeNode(stmt, parents);
         removed.push(`unreached ${names.map((n) => n.text).join(', ')}`);
         changed = true;
       }
     }
+  }
+}
+
+function imports(tree: N): { source: string; names: string[] }[] {
+  const out: { source: string; names: string[] }[] = [];
+  for (const stmt of tree.children) {
+    if (stmt.type !== 'import_statement' && stmt.type !== 'export_statement') continue;
+    const source = child(stmt, 'source')?.text;
+    if (!source) continue;
+    const names: string[] = [];
+    const clause = stmt.children.find((c) => c.type === 'import_clause');
+    for (const c of clause?.children ?? []) {
+      if (c.type === 'identifier') names.push('default');
+      if (c.type === 'namespace_import') names.push('*');
+      if (c.type === 'named_imports') {
+        for (const spec of c.children.filter((x) => x.type === 'import_specifier')) names.push(child(spec, 'name')!.text!);
+      }
+    }
+    // `export * from './x'` and `export { a } from './x'`
+    if (stmt.type === 'export_statement') {
+      const exportClause = stmt.children.find((c) => c.type === 'export_clause');
+      if (exportClause) for (const spec of namedChildren(exportClause)) names.push(child(spec, 'name')?.text ?? '*');
+      else names.push('*');
+    }
+    out.push({ source, names });
+  }
+  return out;
+}
+
+function mapImportSources(tree: N, map: (source: string) => string): void {
+  for (const stmt of tree.children) {
+    if (stmt.type !== 'import_statement' && stmt.type !== 'export_statement') continue;
+    const source = child(stmt, 'source');
+    if (source?.text !== undefined) source.text = map(source.text);
   }
 }
 
@@ -549,7 +604,8 @@ function topLevel(tree: N): Map<string, TopLevelItem> {
     if (!stmt.named) continue;
     if (stmt.type === 'import_statement') {
       const source = child(stmt, 'source')?.text ?? '';
-      add(`import ${source}`, { node: stmt, label: `import '${source}'`, isDeclaration: true });
+      const importOnly = stmt.children.some((c) => c.type === 'import_clause');
+      add(`import ${source}`, { node: stmt, label: `import '${source}'`, isDeclaration: true, importOnly });
       continue;
     }
     const names = declaredNameNodes(stmt).map((n) => n.text!);
@@ -626,11 +682,24 @@ function insertionClassifier(base: N): ClassifyInsertion {
 export const tsx: LanguageAdapter = {
   id: 'tsx',
   extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
-  async parse(source) {
-    const parser = await getParser();
+  async parse(source, presets) {
+    const { parser, language } = await getParser();
     const parsed = parser.parse(source)!;
+    const tags = new Map<number, RawTag>();
+    for (const preset of presets) {
+      const text = preset.queries.tsx;
+      if (!text) continue;
+      for (const match of compile(language, text, preset.vendor).matches(parsed.rootNode)) {
+        const get = (name: string) => match.captures.find((c) => c.name === name)?.node;
+        const bag = get('bag');
+        const read = get('read');
+        const key = get('key');
+        if (bag) tags.set(bag.id, { kind: 'bag' });
+        else if (read && key) tags.set(read.id, { kind: 'read', key: keyText(key), fallbackId: get('fallback')?.id });
+      }
+    }
     const comments: Comment[] = [];
-    const tree = fromTreeSitter(parsed.rootNode, comments);
+    const tree = fromTreeSitter(parsed.rootNode, comments, tags);
     parsed.delete();
     return { tree, comments };
   },
@@ -638,6 +707,8 @@ export const tsx: LanguageAdapter = {
   substituteFlags,
   simplify,
   pruneAdditions,
+  imports,
+  mapImportSources,
   topLevel,
   insertionClassifier,
 };
