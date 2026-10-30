@@ -1,0 +1,22 @@
+{
+  "leaks": [
+    {
+      "kind": "reachable-addition",
+      "additive": "new-endpoint",
+      "line": 4,
+      "severity": "allow"
+    },
+    {
+      "kind": "reachable-addition",
+      "additive": "new-endpoint",
+      "line": 10,
+      "severity": "allow"
+    },
+    {
+      "kind": "reachable-addition",
+      "additive": "new-endpoint",
+      "line": 14,
+      "severity": "allow"
+    }
+  ]
+}

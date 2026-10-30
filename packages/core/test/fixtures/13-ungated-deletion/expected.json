@@ -1,0 +1,9 @@
+{
+  "leaks": [
+    {
+      "kind": "ungated-deletion",
+      "line": 3,
+      "severity": "error"
+    }
+  ]
+}

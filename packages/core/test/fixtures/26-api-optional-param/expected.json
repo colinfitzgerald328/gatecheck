@@ -1,0 +1,10 @@
+{
+  "leaks": [
+    {
+      "kind": "ungated-modification",
+      "additive": "optional-param",
+      "line": 1,
+      "severity": "allow"
+    }
+  ]
+}
