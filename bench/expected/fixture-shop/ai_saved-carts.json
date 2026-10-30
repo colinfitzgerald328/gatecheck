@@ -1,0 +1,6 @@
+{
+  "branch": "ai/saved-carts",
+  "base": "main",
+  "labeledBy": "hand, before running gatecheck",
+  "leaks": []
+}

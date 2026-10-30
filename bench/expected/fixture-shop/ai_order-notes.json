@@ -1,0 +1,23 @@
+{
+  "branch": "ai/order-notes",
+  "base": "main",
+  "labeledBy": "hand, before running gatecheck",
+  "leaks": [
+    {
+      "file": "migrations/002_order_notes.sql",
+      "line": 1,
+      "category": "outside-projection"
+    },
+    {
+      "file": "api/src/routes/orders.ts",
+      "line": 9,
+      "category": "optional-field"
+    },
+    {
+      "file": "api/src/routes/orders.ts",
+      "line": 20,
+      "category": "ungated-modification",
+      "note": "flag-off listOrders now strips note; defensible but runs with the flag off"
+    }
+  ]
+}

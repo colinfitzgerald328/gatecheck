@@ -480,6 +480,104 @@ function constifyLets(tree: N): void {
   });
 }
 
+const FUNCTIONS = new Set(['function_declaration', 'function_expression', 'arrow_function', 'method_definition', 'generator_function_declaration']);
+
+/** A value whose creation has no effects: names, property reads, literals, and objects or arrays of those. */
+function pureValue(n: N): boolean {
+  if (pure(n)) return true;
+  if (n.type === 'object') return namedChildren(n).every((c) => (c.type === 'pair' ? pureValue(child(c, 'value')!) : c.type === 'shorthand_property_identifier'));
+  if (n.type === 'array') return namedChildren(n).every(pureValue);
+  return false;
+}
+
+/**
+ * `const total = subtotal` or `const body = { id: o.id }; res.json(body)`: a constant
+ * used once reads the same as its value written in place. Inlined when the value has
+ * no effects, or when the one use is the declaration right after it. Never into another
+ * function, which would read the value later.
+ */
+function inlineSingleUse(tree: N): void {
+  for (let changed = true; changed; ) {
+    changed = false;
+    const parents = parentMap(tree);
+    walk(tree, (decl) => {
+      if (changed || decl.type !== 'lexical_declaration' || decl.children[0]?.text !== 'const') return;
+      const block = parents.get(decl);
+      if (block?.type !== 'statement_block' && block?.type !== 'program') return;
+      const declarators = decl.children.filter((c) => c.type === 'variable_declarator');
+      if (declarators.length !== 1) return;
+      const nameNode = child(declarators[0], 'name');
+      const value = child(declarators[0], 'value');
+      if (nameNode?.type !== 'identifier' || !value) return;
+
+      const uses: N[] = [];
+      walk(block, (n) => {
+        if (n !== nameNode && REFERENCE_TYPES.has(n.type) && n.text === nameNode.text) uses.push(n);
+      });
+      if (uses.length !== 1) return;
+      const use = uses[0];
+      for (let p = parents.get(use); p && p !== block; p = parents.get(p)) if (FUNCTIONS.has(p.type)) return;
+
+      const next = block.children[block.children.indexOf(decl) + 1];
+      const nextValue = next?.type === 'lexical_declaration' ? next.children.filter((c) => c.type === 'variable_declarator').map((d) => child(d, 'value'))[0] : undefined;
+      if (!pureValue(value) && nextValue !== use) return;
+
+      const holder = parents.get(use)!;
+      const replacement: N =
+        use.type === 'shorthand_property_identifier'
+          ? { type: 'pair', named: true, field: use.field, children: [withField(leaf('property_identifier', use.text!), 'key'), leaf(':', ':', false), withField(clone(value), 'value')] }
+          : withField(clone(value), use.field);
+      holder.children = holder.children.map((c) => (c === use ? replacement : c));
+      block.children = block.children.filter((c) => c !== decl);
+      changed = true;
+    });
+  }
+}
+
+/** A class field nothing reads with `this.<name>`, set to a value with no effects. */
+function dropUnreadClassFields(tree: N): void {
+  walk(tree, (body) => {
+    if (body.type !== 'class_body') return;
+    body.children = body.children.filter((field) => {
+      if (field.type !== 'public_field_definition') return true;
+      const name = child(field, 'name');
+      const value = child(field, 'value');
+      if (name?.type !== 'property_identifier' || (value && !quietInitializer(value))) return true;
+      let read = false;
+      walk(body, (n) => {
+        if (n.type === 'member_expression' && child(n, 'object')?.type === 'this' && child(n, 'property')?.text === name.text) read = true;
+      });
+      return read;
+    });
+  });
+}
+
+/**
+ * Express, Fastify and similar ignore a route handler's return value, so a handler
+ * ending in `return res.json(x)` behaves like one ending in `res.json(x)`.
+ */
+function normalizeHandlerReturns(tree: N): void {
+  const names = new Set<string>();
+  const inline = new Set<N>();
+  walk(tree, (n) => {
+    if (!routeKey(n) || n.type !== 'call_expression') return;
+    for (const arg of namedChildren(child(n, 'arguments')!).slice(1)) {
+      if (arg.type === 'identifier') names.add(arg.text!);
+      if (FUNCTIONS.has(arg.type)) inline.add(arg);
+    }
+  });
+  walk(tree, (fn) => {
+    const isHandler = inline.has(fn) || (fn.type === 'function_declaration' && names.has(child(fn, 'name')?.text ?? ''));
+    const body = isHandler ? child(fn, 'body') : undefined;
+    if (body?.type !== 'statement_block') return;
+    const statements = body.children.filter((c) => c.named);
+    const last = statements.at(-1);
+    const expr = last?.type === 'return_statement' ? namedChildren(last)[0] : undefined;
+    if (!last || !expr) return;
+    body.children = body.children.map((c) => (c === last ? { type: 'expression_statement', named: true, children: [expr, leaf(';', ';', false)] } : c));
+  });
+}
+
 function simplify(tree: N): N {
   // Rules feed each other (a fold can expose a dead branch), so run to a fixpoint.
   let current = tree;
@@ -488,8 +586,15 @@ function simplify(tree: N): N {
     before = ser(current);
     current = rewrite(current, undefined)[0];
   }
-  dropUnreadLocals(current);
-  constifyLets(current);
+  normalizeHandlerReturns(current);
+  for (let i = 0; i < 10; i++) {
+    before = ser(current);
+    dropUnreadLocals(current);
+    dropUnreadClassFields(current);
+    constifyLets(current);
+    inlineSingleUse(current);
+    if (ser(current) === before) break;
+  }
   return current;
 }
 

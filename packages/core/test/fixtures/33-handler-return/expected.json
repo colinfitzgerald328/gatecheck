@@ -1,0 +1,5 @@
+{
+  "leaks": [
+    { "kind": "ungated-modification", "line": 15, "severity": "error" }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "branch": "ai/promo-codes",
+  "base": "main",
+  "labeledBy": "hand, before running gatecheck",
+  "leaks": []
+}

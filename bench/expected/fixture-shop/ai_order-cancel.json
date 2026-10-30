@@ -1,0 +1,26 @@
+{
+  "branch": "ai/order-cancel",
+  "base": "main",
+  "labeledBy": "hand, before running gatecheck",
+  "leaks": [
+    {
+      "file": "api/src/routes/orders.ts",
+      "line": 8,
+      "category": "ungated-modification",
+      "note": "JUDGMENT CALL: 'cancelled' widens the status union; no runtime effect, but an API contract change"
+    },
+    {
+      "file": "api/src/routes/orders.ts",
+      "line": 15,
+      "category": "new-endpoint"
+    },
+    {
+      "file": "api/src/routes/orders.ts",
+      "line": 28,
+      "category": "new-endpoint"
+    }
+  ],
+  "corrections": [
+    "Removed line 11 (CANCELLABLE_STATUSES) after the first gatecheck run: with the flag off, cancelOrder returns 404 before using it, so it's unreached. Labeling error, not a gatecheck miss."
+  ]
+}
