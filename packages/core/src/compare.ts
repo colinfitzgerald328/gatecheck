@@ -38,6 +38,8 @@ export interface Leak {
   allowed?: string;
   /** Extra context, e.g. a failing test's message. */
   detail?: string;
+  /** Claude's second opinion, from `--triage`. */
+  triage?: { verdict: 'equivalent' | 'behavior-change' | 'unclear'; reason: string; model: string };
 }
 
 function span(n: N, fallback: Pos | undefined): Span {

@@ -11,6 +11,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["packages/*/src", "packages/*/test", "gatecheck.config.example.ts"],
+  "include": ["packages/*/src", "packages/*/test", "gatecheck.config.example.ts", "bench/*.ts"],
   "exclude": ["packages/*/test/fixtures"]
 }

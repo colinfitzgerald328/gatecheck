@@ -18,6 +18,15 @@ inputs:
       flags added; otherwise put {junit} where the report path goes. Install dependencies
       before this step.
     default: ''
+  triage:
+    description: >-
+      Ask Claude whether each code leak is a real behavior change or an equivalent rewrite,
+      and show the verdict on the PR. Needs anthropic-api-key. Labels only, unless the config
+      sets triage.downgradeEquivalent.
+    default: 'false'
+  anthropic-api-key:
+    description: API key for triage. Pass a secret, e.g. secrets.ANTHROPIC_API_KEY.
+    default: ''
   comment:
     description: Post the report as a PR comment, updated on each push.
     default: 'true'
@@ -48,10 +57,14 @@ runs:
         BASE: ${{ inputs.base || format('origin/{0}', github.base_ref) }}
         CONFIG: ${{ inputs.config }}
         TEST_COMMAND: ${{ inputs.test-command }}
+        TRIAGE: ${{ inputs.triage }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
       run: |
         args=(check --base "$BASE" --head HEAD)
         [ -n "$CONFIG" ] && args+=(--config "$CONFIG")
         [ -n "$TEST_COMMAND" ] && args+=(--test "$TEST_COMMAND")
+        [ "$TRIAGE" = "true" ] && args+=(--triage)
+        [ -z "$ANTHROPIC_API_KEY" ] && unset ANTHROPIC_API_KEY
         gatecheck() { node "$GITHUB_ACTION_PATH/packages/cli/src/main.ts" "$@"; }
         set +e
         # One run prints the annotations and writes the comment: tests can be slow.

@@ -17,7 +17,7 @@ new flags: expressCheckout
     + return cart.items.reduce((sum, item) => sum + item.price * item.qty, 0) + cart.tax;
 ```
 
-## Status: M5
+## Status: M6
 
 - TypeScript/TSX and Python via tree-sitter (WASM). Python covers `if`/`elif`/`else`,
   `and`/`or`/`not`, conditional expressions, relative and absolute imports, FastAPI/Flask
@@ -35,6 +35,7 @@ new flags: expressCheckout
 - Claude Code plugin: hooks after each edit and before Claude finishes, a skill, `/gatecheck`
 - Dynamic layer: `--test` runs your tests on the base and on the branch with the new flags off
   and reports tests that pass on the base but fail on the branch
+- AI triage: `--triage` asks Claude whether each remaining leak is a real behavior change
 
 Requires Node 23.6+ (runs TypeScript directly, no build step).
 
@@ -71,6 +72,34 @@ npx gatecheck check --base main --test "node --test 'test/**/*.test.ts'"
 
 Set it once in the config with `"test": { "command": "..." }`, or pass `test-command` to the
 GitHub Action.
+
+## AI triage (`--triage`)
+
+gatecheck compares code structure, so it also reports rewrites that behave the same: an
+extracted helper, a renamed variable. With `--triage`, Claude reads each error-level code leak
+with the base and branch versions of its file and labels it:
+
+- **behavior change**: some user or caller would see a difference with the new flags off
+- **likely equivalent**: a rewrite nobody could observe
+- **unclear**: depends on code it can't see, such as what a called function does
+
+```
+  src/cart.ts:2  ungated-modification  in sumCart
+    + return cart.items.reduce(addLine, 0);
+    Claude: likely equivalent. The reducer was moved into addLine with the same arithmetic.
+```
+
+Triage only labels. Leaks stay errors unless you set `"downgradeEquivalent": true`, which
+lowers "likely equivalent" leaks to warnings. It needs `ANTHROPIC_API_KEY`; without one, or if
+the API fails, the check runs as usual and says triage was skipped. It uses `claude-opus-5-5` at
+`medium` effort (configurable), caches the shared prompt, and has the API retry a declined
+request on its recommended fallback model.
+
+```json
+{ "triage": { "enabled": true, "model": "claude-opus-5-5", "effort": "medium", "downgradeEquivalent": false } }
+```
+
+`bench/triage-eval.ts` scores the verdicts against 22 hand-labeled leaks (about $1 a run).
 
 ## Claude Code plugin
 
@@ -125,6 +154,8 @@ jobs:
       - uses: colinfitzgerald328/gatecheck@main
         with:
           test-command: npm test -- --reporter=junit --outputFile={junit}   # optional
+          triage: true                                                      # optional
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
 The action posts one comment per PR and updates it on each push, annotates each leak on

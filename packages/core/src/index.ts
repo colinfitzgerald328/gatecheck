@@ -31,6 +31,16 @@ export interface Config {
     /** e.g. `node --test` with a test glob, or "npm test -- --reporter=junit --outputFile={junit}". */
     command: string;
   };
+  /** Ask Claude whether each remaining code leak is a real behavior change (`gatecheck check --triage`). */
+  triage?: {
+    enabled?: boolean;
+    /** Default `claude-opus-5-5`. */
+    model?: string;
+    /** Default `medium`. */
+    effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+    /** Lower leaks Claude calls equivalent from error to warn. Off by default: triage only labels. */
+    downgradeEquivalent?: boolean;
+  };
   /** Claude Code plugin hooks. */
   hooks?: {
     /** Report leaks in a file right after Claude edits it. Default 'on'. */
@@ -52,3 +62,4 @@ export async function checkSource(
 }
 export { runBench, type BenchResult, type Expectation, type Score } from './bench.ts';
 export { parseJUnit, runDynamic, withJUnit, type DynamicOptions, type DynamicResult, type TestOutcome } from './dynamic.ts';
+export { triageLeaks, type Triage, type TriageOptions, type TriageRun, type Verdict } from './triage.ts';

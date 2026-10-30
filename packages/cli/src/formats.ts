@@ -27,6 +27,17 @@ export function note(leak: ReportedLeak): string | undefined {
   return undefined;
 }
 
+const VERDICT: Record<string, string> = {
+  equivalent: 'likely equivalent',
+  'behavior-change': 'behavior change',
+  unclear: 'unclear',
+};
+
+/** Claude's second opinion on a leak, as one line. */
+export function triageLine(leak: ReportedLeak): string | undefined {
+  return leak.triage ? `Claude: ${VERDICT[leak.triage.verdict]}. ${leak.triage.reason}` : undefined;
+}
+
 export function why(newFlags: string[]): string {
   return newFlags.length ? `Runs with ${newFlags.join(', ')} off` : 'No new flag gates this';
 }
@@ -44,7 +55,8 @@ export function github(result: CheckResult): string {
     .filter((l) => l.severity !== 'allow')
     .map((l) => {
       const level = l.severity === 'error' ? 'error' : 'warning';
-      const message = note(l) ?? `${why(result.newFlags)}. Move it behind a flag, or add ${allowComment(l.file)}`;
+      const advice = note(l) ?? `${why(result.newFlags)}. Move it behind a flag, or add ${allowComment(l.file)}`;
+      const message = [advice, triageLine(l)].filter(Boolean).join(' ');
       return `::${level} file=${l.file},line=${l.head.line},endLine=${l.head.endLine},title=gatecheck: ${describe(l)} in ${escape(l.decl)}::${escape(message)}`;
     })
     .join('\n');
@@ -79,6 +91,8 @@ export function markdown(result: CheckResult, sources: Sources, title: string): 
       const minus = leak.base ? snippet(src?.base, leak.base.line, leak.base.endLine).map((l) => `- ${l}`) : [];
       const plus = leak.kind === 'ungated-deletion' ? [] : snippet(src?.head, leak.head.line, leak.head.endLine).map((l) => `+ ${l}`);
       if (minus.length || plus.length) out.push('```diff', ...minus, ...plus, '```', '');
+      const second = triageLine(leak);
+      if (second) out.push(`> ${second}`, '');
       if (leak.allowed) out.push(`Allowed: ${leak.allowed}`, '');
     }
     out.push('</details>', '');

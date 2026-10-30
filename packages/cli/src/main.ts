@@ -9,6 +9,7 @@ import {
   DEFAULT_POLICY,
   defaultBase,
   runDynamic,
+  triageLeaks,
   readAt,
   repoRoot,
   runBench,
@@ -18,7 +19,7 @@ import {
   type Score,
 } from '@gatecheck/core';
 import { findConfig, loadConfig } from './config.ts';
-import { allowComment, describe, github, markdown, note, why, type Sources } from './formats.ts';
+import { allowComment, describe, github, markdown, note, triageLine, why, type Sources } from './formats.ts';
 import { runHook } from './hook.ts';
 import { runInit } from './init.ts';
 
@@ -36,6 +37,8 @@ Options:
   --base <ref>      what the branch is compared to (default: config base, origin's default branch, or main)
   --head <ref>      check a ref instead of the working tree
   --flag <key>      project this flag instead of detecting new ones (repeatable)
+  --triage          ask Claude whether each code leak is a real behavior change (needs
+                    ANTHROPIC_API_KEY; labels only unless triage.downgradeEquivalent is set)
   --test <command>  also run the tests on the base and the branch with the new flags off
                     (node --test, vitest and pytest get JUnit flags added; else use {junit})
   --config <path>   config file (default: nearest gatecheck.config.{ts,mjs,json})
@@ -94,6 +97,8 @@ function printText(title: string, result: CheckResult, sources: Sources): void {
       }
       if (leak.base) for (const l of snippet(src?.base, leak.base.line, leak.base.endLine)) console.log(red(`    - ${l.trim()}`));
       if (leak.kind !== 'ungated-deletion') for (const l of snippet(src?.head, leak.head.line, leak.head.endLine)) console.log(green(`    + ${l.trim()}`));
+      const second = triageLine(leak);
+      if (second) console.log(`    ${second}`);
       if (leak.allowed) console.log(dim(`    allowed: ${leak.allowed}`));
       else if (leak.severity === 'error') {
         console.log(dim(`    ${why(newFlags)}. Move it behind a flag, or add ${allowComment(leak.file)}`));
@@ -129,6 +134,7 @@ async function main(): Promise<number> {
       json: { type: 'boolean' },
       format: { type: 'string' },
       test: { type: 'string' },
+      triage: { type: 'boolean' },
       'markdown-out': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
@@ -163,6 +169,22 @@ async function main(): Promise<number> {
       if (dynamic.flaky.length) title += ` (${dynamic.flaky.length} flaky, ignored)`;
     }
     const sources = new Map(changes.map((c) => [c.path, c]));
+
+    if (values.triage || config.triage?.enabled) {
+      const run = await triageLeaks(result.leaks, {
+        newFlags: result.newFlags,
+        sources,
+        model: config.triage?.model,
+        effort: config.triage?.effort,
+      });
+      if (config.triage?.downgradeEquivalent) {
+        for (const l of result.leaks) if (l.triage?.verdict === 'equivalent' && l.severity === 'error') l.severity = 'warn';
+      }
+      if (run.skipped) console.error(`gatecheck: triage skipped: ${run.skipped}`);
+      for (const e of run.errors) console.error(`gatecheck: triage failed for ${e}`);
+      if (run.triaged) title += `, ${run.triaged} triaged by Claude`;
+    }
+
     output(format, result, sources, title);
     if (values['markdown-out']) writeFileSync(values['markdown-out'], markdown(result, sources, title));
     return result.leaks.some((l) => l.severity === 'error') ? 1 : 0;

@@ -18,6 +18,7 @@ export interface LoadedConfig {
   base?: string;
   hooks: Required<NonNullable<Config['hooks']>>;
   test?: Config['test'];
+  triage?: Config['triage'];
 }
 
 export async function loadConfig(path: string | undefined): Promise<LoadedConfig> {
@@ -44,5 +45,6 @@ export async function loadConfig(path: string | undefined): Promise<LoadedConfig
     base: config.base,
     hooks: { postEdit: 'on', stop: 'warn', requireNewFlag: true, ...config.hooks },
     test: config.test,
+    triage: config.triage,
   };
 }

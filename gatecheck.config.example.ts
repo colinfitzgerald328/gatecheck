@@ -5,6 +5,8 @@ export default {
   // Built-in names, or your own: { vendor: 'acme', queries: { tsx: './acme.tsx.scm' } }.
   // Query captures are documented in packages/core/src/presets/types.ts.
   presets: ['launchdarkly'],
+  // Optional: ask Claude whether each leak is a real behavior change (needs ANTHROPIC_API_KEY).
+  // triage: { enabled: true, model: 'claude-opus-5-5', effort: 'medium', downgradeEquivalent: false },
   // Optional: also run the tests on the base and the branch with the new flags off.
   // test: { command: "node --test 'test/**/*.test.ts'" },
   policy: {
