@@ -1,8 +1,25 @@
 # gatecheck
 
-Checks that code written by an AI agent is fully behind its feature flags.
+Keeps your codebase sane while you ship feature after feature behind flags.
 
-gatecheck turns every **new** flag off in the branch's code, simplifies what's left
+Shipping every end-to-end feature behind its own flag lets you merge constantly and turn things
+on when they're ready. That works as long as you can follow the chain: flag off, the app does
+what it did before; flag on, it does that plus the feature. One quick fix to a shared helper, a
+changed default or a deleted `else` breaks the chain. That change goes out to every user the
+moment you merge, flag or not, and it's easy to miss in review because most of a feature diff
+is supposed to be new. After a few dozen features, nobody can say what turning a flag off
+actually does.
+
+gatecheck checks each diff so the chain holds: with its new flags off, the branch does exactly
+what `main` does. However many features you ship, each one stays a switch you can reason about.
+
+It also takes the most tiring part out of code review. Reviewers stop combing every line of a
+big feature diff for the one change that escaped the flag. gatecheck points at it, or says
+there isn't one, and the review can be about the feature itself.
+
+## How it works
+
+It turns every **new** flag off in the branch's code, simplifies what's left
 (folds `if (false)`, picks the `else` branch, cuts code after early returns, drops
 imports and helpers nothing reaches), and compares the result to `main`. Anything
 that still differs runs with the flag off. That's a leak.
@@ -16,6 +33,10 @@ new flags: expressCheckout
     - return cart.items.reduce((sum, item) => sum + item.price * item.qty, 0);
     + return cart.items.reduce((sum, item) => sum + item.price * item.qty, 0) + cart.tax;
 ```
+
+It works on the diff, so it doesn't matter who wrote the change: you, a teammate, or a coding
+agent. Run it before you push, make it a required check on every PR, or put it in Claude Code
+so an agent fixes its own leaks as it goes.
 
 ## Status: M6
 
