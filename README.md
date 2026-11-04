@@ -1,6 +1,7 @@
 # gatecheck
 
-Keeps your codebase sane while you ship feature after feature behind flags.
+A safety harness for shipping fast behind flags: with a new flag off, your branch does exactly
+what `main` does. gatecheck makes sure of it.
 
 Shipping every end-to-end feature behind its own flag lets you merge constantly and turn things
 on when they're ready. That works as long as you can follow the chain: flag off, the app does
